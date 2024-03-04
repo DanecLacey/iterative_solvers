@@ -28,4 +28,10 @@ void sum_matrices(
     const COOMtxData *mtx2
 );
 
+void spmv_crs(
+    std::vector<double> *y,
+    const CRSMtxData *crs_mat,
+    const std::vector<double> *x
+    );
+
 #endif /*KERNELS_H*/

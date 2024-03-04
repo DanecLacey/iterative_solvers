@@ -13,7 +13,7 @@
 #include <vector>
 
 
-#include "structs.hpp"
+// #include "structs.hpp"
 #include "kernels.hpp"
 #include "mmio.h"
 
@@ -335,16 +335,21 @@ double infty_vec_norm(
     return max_abs;
 }
 
-double infty_mtx_coo_norm(
-    COOMtxData *full_coo_mtx
+double infty_mat_norm(
+    CRSMtxData *crs_mat
 ){
     // Accumulate with sum all the elements in each row
-    std::vector<double> row_sums(full_coo_mtx->n_cols, 0);
+    std::vector<double> row_sums(crs_mat->n_rows, 0.0);
 
-    // Good OpenMP candidate
-    for(int nz_idx = 0; nz_idx < full_coo_mtx->nnz; ++nz_idx){
-        row_sums[full_coo_mtx->I[nz_idx]] += abs(full_coo_mtx->values[nz_idx]); 
-    }
+    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx)
+        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+#ifdef DEBUG_MODE
+            std::cout << "summing: " << crs_mat->val[nz_idx] << " in infty mat norm" << std::endl;
+#endif
+            // row_sums[row_idx] += abs(crs_mat->val[nz_idx]); 
+            row_sums[row_idx] += crs_mat->val[nz_idx]; 
+
+        }
 
     // The largest sum is the matrix infty norm
     return infty_vec_norm(&row_sums);
@@ -353,15 +358,19 @@ double infty_mtx_coo_norm(
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
 double calc_residual(
-    COOMtxData *full_coo_mtx,
+    CRSMtxData *crs_mat,
     std::vector<double> *x_new,
     std::vector<double> *b
 ){
-    std::vector<double> A_x_new(full_coo_mtx->n_cols); 
-    mtx_spmv_coo(&A_x_new, full_coo_mtx, x_new);
+    int n_cols = crs_mat->n_cols;
 
-    std::vector<double> A_x_new_minus_b(full_coo_mtx->n_cols);
-    std::vector<double> neg_b(full_coo_mtx->n_cols);
+    std::vector<double> A_x_new(n_cols); 
+
+    spmv_crs(&A_x_new, crs_mat, x_new);
+
+    std::vector<double> A_x_new_minus_b(n_cols);
+    std::vector<double> neg_b(n_cols);
+
     neg_b = *b;
     std::transform( // negate
         neg_b.cbegin(), 
@@ -369,6 +378,7 @@ double calc_residual(
         neg_b.begin(), 
         std::negate<double>()
     );
+
     sum_vectors(&A_x_new_minus_b, &A_x_new, &neg_b);
 
     return infty_vec_norm(&A_x_new_minus_b);
@@ -443,30 +453,53 @@ double end_time(
     return seconds + microseconds*1e-6;
 }
 
+// void jacobi_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// ){
+//     // TODO: definetly dont initialize these in-loop, bad for performance and stupid
+//     std::vector<double> L_plus_U_mult_x_old(D_inv_coo_vec->size(), 0);
+//     std::vector<double> neg_D_inv_mult_L_plus_U_mult_x_old(D_inv_coo_vec->size(), 0);
+//     std::vector<double> D_inv_mult_b(D_inv_coo_vec->size(), 0);
+    
+//     // 1. SpMV (L + U)*x_old
+//     mtx_spmv_coo(&L_plus_U_mult_x_old, full_coo_L_plus_U_mtx, x_old);
+
+//     // 2. "SpMV" D^{-1}*b (elementwise multiplication) //NOTE: 1 and 2 independent
+//     vec_spmv_coo(&D_inv_mult_b, D_inv_coo_vec, b);
+
+//     // 3 "SpMV" -D^{-1}*((L + U)*x_old) (elementwise multiplication)
+//     vec_spmv_coo(&neg_D_inv_mult_L_plus_U_mult_x_old, neg_D_inv_coo_vec, &L_plus_U_mult_x_old);
+
+//     // 4. Vector Sum x_new = -D^{-1}*(L + U)*x_old + D^{-1}*b (elementwise sum)
+//     sum_vectors(x_new, &neg_D_inv_mult_L_plus_U_mult_x_old, &D_inv_mult_b);
+// }
+
 void jacobi_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
+    CRSMtxData *crs_mat,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new
 ){
-    // TODO: definetly dont initialize these in-loop, bad for performance and stupid
-    std::vector<double> L_plus_U_mult_x_old(D_inv_coo_vec->size(), 0);
-    std::vector<double> neg_D_inv_mult_L_plus_U_mult_x_old(D_inv_coo_vec->size(), 0);
-    std::vector<double> D_inv_mult_b(D_inv_coo_vec->size(), 0);
-    
-    // 1. SpMV (L + U)*x_old
-    mtx_spmv_coo(&L_plus_U_mult_x_old, full_coo_L_plus_U_mtx, x_old);
+    double diag_elem;
+    double sum;
 
-    // 2. "SpMV" D^{-1}*b (elementwise multiplication) //NOTE: 1 and 2 independent
-    vec_spmv_coo(&D_inv_mult_b, D_inv_coo_vec, b);
-
-    // 3 "SpMV" -D^{-1}*((L + U)*x_old) (elementwise multiplication)
-    vec_spmv_coo(&neg_D_inv_mult_L_plus_U_mult_x_old, neg_D_inv_coo_vec, &L_plus_U_mult_x_old);
-
-    // 4. Vector Sum x_new = -D^{-1}*(L + U)*x_old + D^{-1}*b (elementwise sum)
-    sum_vectors(x_new, &neg_D_inv_mult_L_plus_U_mult_x_old, &D_inv_mult_b);
+    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
+        sum = 0;
+        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+            if(row_idx == crs_mat->col[nz_idx]){
+                diag_elem = crs_mat->val[nz_idx];
+            }
+            else{
+                sum += crs_mat->val[nz_idx] * (*x_old)[crs_mat->col[nz_idx]];
+            }
+        }
+        (*x_new)[row_idx] = ((*b)[row_idx] - sum) / diag_elem;
+    }
 }
 
 void recip_elems(
@@ -512,33 +545,32 @@ void jacobi_solve(
     std::vector<double> *x_new,
     std::vector<double> *x_star,
     std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
+    CRSMtxData *crs_mat,
     std::vector<double> *residuals_vec,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 )
 {
-    std::cout << "Do I get into Jacobi Solve?" << std::endl;
-    int ncols = full_coo_mtx->n_cols;
+    int ncols = crs_mat->n_cols;
     double residual;
     double stopping_criteria;
 
     // Declare structs
-    std::vector<double> D_coo_vec(ncols);
-    COOMtxData L_coo_mtx, U_coo_mtx, full_coo_L_plus_U_mtx;
+    // std::vector<double> D_coo_vec(ncols);
+    // COOMtxData L_coo_mtx, U_coo_mtx, full_coo_L_plus_U_mtx;
 
-    // Split COO matrix 
-    split_upper_lower_diagonal(full_coo_mtx, &U_coo_mtx, &L_coo_mtx, &D_coo_vec);
+    // // Split COO matrix 
+    // split_upper_lower_diagonal(full_crs_mtx, &U_coo_mtx, &L_coo_mtx, &D_coo_vec);
 
-    // NOTE: The following computations can be performed outside of the main loop, since they are not changing
-    // Form L+U matrix-matrix elementwise sum 
-    sum_matrices(&full_coo_L_plus_U_mtx, &U_coo_mtx, &L_coo_mtx); 
+    // // NOTE: The following computations can be performed outside of the main loop, since they are not changing
+    // // Form L+U matrix-matrix elementwise sum 
+    // sum_matrices(&full_coo_L_plus_U_mtx, &U_coo_mtx, &L_coo_mtx); 
 
-    // Form -D^{-1}
-    std::vector<double> neg_D_inv_coo_vec(ncols);
-    std::vector<double> D_inv_coo_vec(ncols);
-    gen_neg_inv(&neg_D_inv_coo_vec, &D_inv_coo_vec, &D_coo_vec);
+    // // Form -D^{-1}
+    // std::vector<double> neg_D_inv_coo_vec(ncols);
+    // std::vector<double> D_inv_coo_vec(ncols);
+    // gen_neg_inv(&neg_D_inv_coo_vec, &D_inv_coo_vec, &D_coo_vec);
     
     if(flags->print_iters){
         iter_output(x_old, loop_params->iter_count);
@@ -550,7 +582,7 @@ void jacobi_solve(
     // }
 
     // Precalculate what we can of stopping criteria
-    double infty_norm_A = infty_mtx_coo_norm(full_coo_mtx);
+    double infty_norm_A = infty_mat_norm(crs_mat);
     double infty_norm_b = infty_vec_norm(b);
 
     // Begin timer
@@ -560,17 +592,13 @@ void jacobi_solve(
     // Perform Jacobi iterations until error cond. satisfied
     // Using relation: x_new = -D^{-1}*(L + U)*x_old + D^{-1}*b
     // After Jacobi iteration loop, x_new ~ A^{-1}b
-    (*residuals_vec)[0] = calc_residual(full_coo_mtx, x_old, b);
-
-    std::cout << "The initial residual is: " << (*residuals_vec)[0] << std::endl;
-
+    (*residuals_vec)[0] = calc_residual(crs_mat, x_old, b);
 
     // Tasking candidate
     do{
-        std::cout << "Do I get into The do loop?" << std::endl;
-        jacobi_iteration(&full_coo_L_plus_U_mtx, &D_inv_coo_vec, &neg_D_inv_coo_vec, b, x_old, x_new);
+        jacobi_iteration(crs_mat, b, x_old, x_new);
         ++loop_params->iter_count;
-        residual = calc_residual(full_coo_mtx, x_new, b);
+        residual = calc_residual(crs_mat, x_new, b);
         stopping_criteria = loop_params->tol * (infty_norm_A * infty_vec_norm(x_new) + infty_norm_b);
         if(flags->print_residuals){
             (*residuals_vec)[loop_params->iter_count] = residual;
@@ -583,16 +611,18 @@ void jacobi_solve(
             flags->convergence_flag = false;
             break;
         }
-
+#ifdef DEBUG_MODE
         std::cout << "[";
         for(int i = 0; i < x_new->size(); ++i){
             std::cout << (*x_new)[i] << ", ";
         }
         std::cout << "]" << std::endl;
+#endif
         std::swap(*x_new, *x_old);
+#ifdef DEBUG_MODE    
         std::cout << "residual: " << residual << std::endl;
         std::cout << "stopping_criteria: " << stopping_criteria << std::endl; 
-        
+#endif    
     } while(residual > stopping_criteria);
 
     std::swap(*x_old, *x_star);
@@ -601,130 +631,130 @@ void jacobi_solve(
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);
 }
 
-void gs_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-){}
+// void gs_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// ){}
 
-void gs_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-){}
+// void gs_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// ){}
 
-void trivial_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-){}
+// void trivial_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// ){}
 
-void trivial_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-){}
+// void trivial_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// ){}
 
-void FOM_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-){}
+// void FOM_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// ){}
 
-void initialize_with_zeros_COO(
-    COOMtxData *full_coo_mtx,
-    int nrows,
-    int ncols
-){
-    full_coo_mtx->n_rows = nrows;
-    // int n_rows{};
+// void initialize_with_zeros_COO(
+//     COOMtxData *full_coo_mtx,
+//     int nrows,
+//     int ncols
+// ){
+//     full_coo_mtx->n_rows = nrows;
+//     // int n_rows{};
 
-    full_coo_mtx->n_cols = ncols;
-    // int n_cols{};
+//     full_coo_mtx->n_cols = ncols;
+//     // int n_cols{};
 
-    full_coo_mtx->nnz = 0;
-    // int nnz{};
+//     full_coo_mtx->nnz = 0;
+//     // int nnz{};
 
-    full_coo_mtx->is_sorted = true;
-    // bool is_sorted{}; = 1;
+//     full_coo_mtx->is_sorted = true;
+//     // bool is_sorted{}; = 1;
 
-    full_coo_mtx->is_symmetric = false;
-    // bool is_symmetric{}; = 1;
-
-    
-    std::vector<double> sized_zero_vec(nrows*ncols, 0.0);
-
-    full_coo_mtx->I = ;
-    // std::vector<int> J;
-
-    full_coo_mtx->J = ;
-    // std::vector<int> J;
-
-    full_coo_mtx->values = ;
-    // std::vector<double> values;
-
-}
-
-void FOM_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-){
-    // This does not seem like an"iterative" method
-    int ncols = full_coo_mtx->n_cols;
-    double residual;
-
-    // Declare structs
-    std::vector<double> w_new(ncols);
-    std::vector<double> w_old(ncols);
-    COOMtxData V_m, H_m;
-
-    // Just something for now
-    int target_dim = ncols - .25 * ncols
-
-    initialize_with_zeros_COO(&V_m, target_dim, target_dim);
-    initialize_with_zeros_COO(&H_m, target_dim, target_dim);
+//     full_coo_mtx->is_symmetric = false;
+//     // bool is_symmetric{}; = 1;
 
     
+//     std::vector<double> sized_zero_vec(nrows*ncols, 0.0);
 
-    FOM_iteration();
-}
+//     full_coo_mtx->I = ;
+//     // std::vector<int> J;
 
-void Arnoldi_iteration(
-    std::vector<double> *v_1,
-    COOMtxData *H_m,
-    COOMtxData *V_m,
-    int target_dim,
-    Flags *flags,
-    LoopParams *loop_params
-){}
+//     full_coo_mtx->J = ;
+//     // std::vector<int> J;
+
+//     full_coo_mtx->values = ;
+//     // std::vector<double> values;
+
+// }
+
+// void FOM_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// ){
+//     // // This does not seem like an"iterative" method
+//     // int ncols = full_coo_mtx->n_cols;
+//     // double residual;
+
+//     // // Declare structs
+//     // std::vector<double> w_new(ncols);
+//     // std::vector<double> w_old(ncols);
+//     // COOMtxData V_m, H_m;
+
+//     // // Just something for now
+//     // int target_dim = ncols - .25 * ncols
+
+//     // initialize_with_zeros_COO(&V_m, target_dim, target_dim);
+//     // initialize_with_zeros_COO(&H_m, target_dim, target_dim);
+
+    
+
+//     // FOM_iteration();
+// }
+
+// void Arnoldi_iteration(
+//     std::vector<double> *v_1,
+//     COOMtxData *H_m,
+//     COOMtxData *V_m,
+//     int target_dim,
+//     Flags *flags,
+//     LoopParams *loop_params
+// ){}
 
 void write_residuals_to_file(std::vector<double> *residuals_vec){
     std::fstream out_file;

@@ -182,3 +182,25 @@ void sum_matrices(
     // }
 
 }
+
+void spmv_crs(
+    std::vector<double> *y,
+    const CRSMtxData *mtx,
+    const std::vector<double> *x
+    )
+{
+    // int nnz = mtx->nnz;
+    // if (mtx->I.size() != mtx->J.size() || mtx->I.size() != mtx->values.size()) {
+    //     printf("ERROR: mtx_spmv_coo : sizes of rows, cols, and values differ.\n");
+    //     exit(1);
+    // }
+
+    // parallel for candidate
+    for(int row_idx = 0; row_idx < mtx->n_rows; ++row_idx){
+        for(int nz_idx = mtx->row_ptr[row_idx]; nz_idx < mtx->row_ptr[row_idx+1]; ++nz_idx){
+            (*y)[row_idx] += mtx->val[nz_idx] * (*x)[mtx->col[nz_idx]];
+            // std::cout << mtx->vals[nz_idx] << " * " << (*x)[mtx->col[nz_idx]] << " = " << (*y)[row_idx] << " at idx: " << row_idx << std::endl; 
+        }
+    }
+
+}

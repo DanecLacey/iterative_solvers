@@ -46,7 +46,7 @@ void generate_vector(
 );
 
 double calc_residual(
-    COOMtxData *full_coo_mtx,
+    CRSMtxData *full_crs_mtx,
     std::vector<double> *x_new,
     std::vector<double> *b
 );
@@ -87,9 +87,7 @@ double end_time(
 );
 
 void jacobi_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
+    CRSMtxData *full_crs_mtx,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new
@@ -100,84 +98,84 @@ void jacobi_solve(
     std::vector<double> *x_new,
     std::vector<double> *x_star,
     std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
+    CRSMtxData *full_crs_mtx,
     std::vector<double> *residuals_vec,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 );
 
-void gs_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-);
+// void gs_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// );
 
-void gs_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-);
+// void gs_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// );
 
-void trivial_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-);
+// void trivial_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// );
 
-void trivial_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-);
+// void trivial_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// );
 
-void FOM_iteration(
-    COOMtxData *full_coo_L_plus_U_mtx,
-    std::vector<double> *D_inv_coo_vec,
-    std::vector<double> *neg_D_inv_coo_vec,
-    std::vector<double> *b,
-    std::vector<double> *x_old,
-    std::vector<double> *x_new
-);
+// void FOM_iteration(
+//     COOMtxData *full_coo_L_plus_U_mtx,
+//     std::vector<double> *D_inv_coo_vec,
+//     std::vector<double> *neg_D_inv_coo_vec,
+//     std::vector<double> *b,
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new
+// );
 
-void FOM_solve(
-    std::vector<double> *x_old,
-    std::vector<double> *x_new,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    COOMtxData *full_coo_mtx,
-    std::vector<double> *residuals_vec,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params
-);
+// void FOM_solve(
+//     std::vector<double> *x_old,
+//     std::vector<double> *x_new,
+//     std::vector<double> *x_star,
+//     std::vector<double> *b,
+//     COOMtxData *full_coo_mtx,
+//     std::vector<double> *residuals_vec,
+//     double *calc_time_elapsed,
+//     Flags *flags,
+//     LoopParams *loop_params
+// );
 
-void Arnoldi_iteration(
-    std::vector<double> *v_1,
-    COOMtxData *H_m,
-    COOMtxData *V_m,
-    int target_dim,
-    Flags *flags,
-    LoopParams *loop_params
-);
+// void Arnoldi_iteration(
+//     std::vector<double> *v_1,
+//     COOMtxData *H_m,
+//     COOMtxData *V_m,
+//     int target_dim,
+//     Flags *flags,
+//     LoopParams *loop_params
+// );
 
 
 
@@ -187,8 +185,8 @@ double infty_vec_norm(
     const std::vector<double> *vec
 );
 
-double infty_mtx_coo_norm(
-    COOMtxData *full_coo_mtx
+double infty_mat_norm(
+    CRSMtxData *crs_mat
 );
 
 void gen_neg_inv(

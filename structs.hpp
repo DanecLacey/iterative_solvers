@@ -22,6 +22,29 @@ struct LoopParams
     double tol;
 };
 
+struct CRSMtxData
+{
+    int n_rows{};
+    int n_cols{};
+    int nnz{};
+
+    // TODO
+    // Interface* ce;
+    int *row_ptr, *col;
+    double *val;
+
+    // TODO
+    // int *rcmPerm, *rcmInvPerm;
+    // bool readFile(char* filename);
+
+    // void makeDiagFirst(double missingDiag_value=0.0, bool rewriteAllDiag_with_maxRowSum=false);
+    // bool isSymmetric();
+    // void doRCM();
+    // void doRCMPermute();
+
+    void permute(int* perm, int* invPerm, bool RACEalloc=false);
+};
+
 // TODO: Make class with member funcitons
 struct COOMtxData
 {
@@ -36,7 +59,15 @@ struct COOMtxData
     std::vector<int> J;
     std::vector<double> values;
 
-    bool operator==(COOMtxData &rhs)
+    // bool operator==(COOMtxData &rhs);
+
+    // void operator^(COOMtxData &rhs);
+
+    // void print(void);
+
+    // void convert_to_crs(CRSMtxData *rhs);
+
+bool operator==(COOMtxData &rhs)
     {
     return (
         (n_rows == rhs.n_rows) &&
@@ -49,9 +80,8 @@ struct COOMtxData
         (values == rhs.values)
     );
     }
-
-    void operator^(COOMtxData &rhs)
-    {
+void operator^(COOMtxData &rhs)
+        {
         if (n_rows != rhs.n_rows){
             std::cout << "n_rows != rhs.n_rows" << std::endl;
         }
@@ -86,7 +116,9 @@ struct COOMtxData
             std::cout << "values.size() " << values.size() << " != rhs.values.size() " << rhs.values.size() << std::endl;
         }
     }
-    void print(void){
+
+void print(void)
+{
         std::cout << "n_rows = " << n_rows << std::endl;
         std::cout << "n_cols = " << n_cols << std::endl;
         std::cout << "nnz = " << nnz << std::endl;
@@ -111,6 +143,51 @@ struct COOMtxData
         }
         std::cout << "]" << std::endl;
     }
+
+void convert_to_crs(CRSMtxData *rhs)
+{
+    rhs->n_rows = this->n_rows;
+    rhs->n_cols = this->n_cols;
+    rhs->nnz = this->nnz;
+
+    rhs->row_ptr = new int[rhs->n_rows+1];
+    int *nnzPerRow = new int[rhs->n_rows];
+
+    rhs->col = new int[rhs->nnz];
+    rhs->val = new double[rhs->nnz];
+
+    for(int idx = 0; idx < rhs->nnz; ++idx)
+    {
+        rhs->col[idx] = this->J[idx];
+        rhs->val[idx] = this->values[idx];
+    }
+
+    for(int i = 0; i < rhs->n_rows; ++i)
+    { 
+        nnzPerRow[i] = 0;
+    }
+
+    //count nnz per row
+    for(int i=0; i < rhs->nnz; ++i)
+    {
+        ++nnzPerRow[this->I[i]];
+    }
+
+    rhs->row_ptr[0] = 0;
+    for(int i=0; i < rhs->n_rows; ++i)
+    {
+        rhs->row_ptr[i+1] = rhs->row_ptr[i]+nnzPerRow[i];
+    }
+
+    if(rhs->row_ptr[rhs->n_rows] != rhs->nnz)
+    {
+        printf("ERROR: converting to CRS.\n");
+        exit(1);
+    }
+
+    delete[] nnzPerRow;
+}
+
 
     // COOMtxData operator+(COOMtxData &rhs)
     // {
@@ -143,9 +220,121 @@ struct COOMtxData
     // }
 };
 
-// TODO
-// struct CRSMtxData
-// {
 
-// };
+// TODO
+//necessary for GS like kernels
+// void CRSMtxData::makeDiagFirst(double missingDiag_value, bool rewriteAllDiag_with_maxRowSum)
+// {
+//     double maxRowSum=0.0;
+//     if(!diagFirst || rewriteAllDiag_with_maxRowSum)
+//     {
+//         //check whether a new allocation is necessary
+//         int extra_nnz=0;
+//         std::vector<double>* val_with_diag = new std::vector<double>();
+//         std::vector<int>* col_with_diag = new std::vector<int>();
+//         std::vector<int>* rowPtr_with_diag = new std::vector<int>(rowPtr, rowPtr+nrows+1);
+
+//         for(int row=0; row<nrows; ++row)
+//         {
+//             bool diagHit = false;
+//             double rowSum=0;
+//             for(int idx=rowPtr[row]; idx<rowPtr[row+1]; ++idx)
+//             {
+//                 val_with_diag->push_back(val[idx]);
+//                 col_with_diag->push_back(col[idx]);
+//                 rowSum += val[idx];
+
+//                 if(col[idx] == row)
+//                 {
+//                     diagHit = true;
+//                 }
+//             }
+//             if(!diagHit)
+//             {
+//                 val_with_diag->push_back(missingDiag_value);
+//                 col_with_diag->push_back(row);
+//                 ++extra_nnz;
+//                 rowSum += missingDiag_value;
+//             }
+//             maxRowSum = std::max(maxRowSum, std::abs(rowSum));
+//             rowPtr_with_diag->at(row+1) = rowPtr_with_diag->at(row+1) + extra_nnz;
+//         }
+
+//         //allocate new matrix if necessary
+//         if(extra_nnz)
+//         {
+//             delete[] val;
+//             delete[] col;
+//             delete[] rowPtr;
+
+//             nnz += extra_nnz;
+//             val = new double[nnz];
+//             col = new int[nnz];
+//             rowPtr = new int[nrows+1];
+
+//             rowPtr[0] = rowPtr_with_diag->at(0);
+// #pragma omp parallel for schedule(static)
+//             for(int row=0; row<nrows; ++row)
+//             {
+//                 rowPtr[row+1] = rowPtr_with_diag->at(row+1);
+//                 for(int idx=rowPtr_with_diag->at(row); idx<rowPtr_with_diag->at(row+1); ++idx)
+//                 {
+//                     val[idx] = val_with_diag->at(idx);
+//                     col[idx] = col_with_diag->at(idx);
+//                 }
+//             }
+//             printf("Explicit 0 in diagonal entries added\n");
+//         }
+
+//         delete val_with_diag;
+//         delete col_with_diag;
+//         delete rowPtr_with_diag;
+
+// #pragma omp parallel for schedule(static)
+//         for(int row=0; row<nrows; ++row)
+//         {
+//             bool diag_hit = false;
+
+//             double* newVal = new double[rowPtr[row+1]-rowPtr[row]];
+//             int* newCol = new int[rowPtr[row+1]-rowPtr[row]];
+//             for(int idx=rowPtr[row], locIdx=0; idx<rowPtr[row+1]; ++idx, ++locIdx)
+//             {
+//                 //shift all elements+1 until diag entry
+//                 if(col[idx] == row)
+//                 {
+//                     if(rewriteAllDiag_with_maxRowSum)
+//                     {
+//                         newVal[0] = maxRowSum;
+//                     }
+//                     else
+//                     {
+//                         newVal[0] = val[idx];
+//                     }
+//                     newCol[0] = col[idx];
+//                     diag_hit = true;
+//                 }
+//                 else if(!diag_hit)
+//                 {
+//                     newVal[locIdx+1] = val[idx];
+//                     newCol[locIdx+1] = col[idx];
+//                 }
+//                 else
+//                 {
+//                     newVal[locIdx] = val[idx];
+//                     newCol[locIdx] = col[idx];
+//                 }
+//             }
+//             //assign new Val
+//             for(int idx = rowPtr[row], locIdx=0; idx<rowPtr[row+1]; ++idx, ++locIdx)
+//             {
+//                 val[idx] = newVal[locIdx];
+//                 col[idx] = newCol[locIdx];
+//             }
+
+//             delete[] newVal;
+//             delete[] newCol;
+//         }
+//         diagFirst = true;
+//     }
+// }
 #endif /*STRUCTS_H*/

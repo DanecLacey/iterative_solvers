@@ -1,27 +1,30 @@
 CCX=g++
 CFLAGS=-I.
+DEBUG_MODE = 0
 
-# CXX += -pg
+ifeq ($(DEBUG_MODE),1)
+  DEBUGFLAGS += -g -DDEBUG_MODE
+endif
 
 main: main.o funcs.o kernels.o mmio.o
 	$(CCX) -o main main.o funcs.o kernels.o mmio.o
 	-rm *.o
 	
 # main only depends on funcs, mmio, and structs header, not kernels
-main.o: main.cpp funcs.hpp structs.hpp
-	$(CCX) -c main.cpp -o main.o
+main.o: main.cpp funcs.hpp
+	$(CCX) $(DEBUGFLAGS) -c main.cpp -o main.o
 	
 # funcs depends on kernels
-funcs.o: funcs.cpp funcs.hpp kernels.o structs.hpp kernels.hpp mmio.o
-	$(CCX) -c funcs.cpp -o funcs.o
+funcs.o: funcs.cpp funcs.hpp kernels.o mmio.o
+	$(CCX) $(DEBUGFLAGS) -c funcs.cpp -o funcs.o
 
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
-	$(CCX) -c kernels.cpp -o kernels.o
+	$(CCX) $(DEBUGFLAGS) -c kernels.cpp -o kernels.o
 
 # only depends on "mmio" src and header
 mmio.o: mmio.cpp mmio.h
-	$(CCX) -c mmio.cpp -o mmio.o
+	$(CCX) $(DEBUGFLAGS) -c mmio.cpp -o mmio.o
 
 #################### Test Suite ####################
 TEST_INC_DIR = /home/danel/iterative_solvers/splitting_type_solvers
