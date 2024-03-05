@@ -58,7 +58,7 @@ inline void sort_perm(int *arr, int *perm, int len, bool rev=false)
 
 void read_mtx(
     const std::string matrix_file_name,
-    COOMtxData *full_coo_mtx
+    COOMtxData *coo_mat
     )
 {
     char* filename = const_cast<char*>(matrix_file_name.c_str());
@@ -208,14 +208,14 @@ void read_mtx(
     delete[] val_unsorted;
     delete[] row_unsorted;
 
-    full_coo_mtx->values = std::vector<double>(val, val + nnz);
-    full_coo_mtx->I = std::vector<int>(row, row + nnz);
-    full_coo_mtx->J = std::vector<int>(col, col + nnz);
-    full_coo_mtx->n_rows = nrows;
-    full_coo_mtx->n_cols = ncols;
-    full_coo_mtx->nnz = nnz;
-    full_coo_mtx->is_sorted = 1; // TODO: not sure
-    full_coo_mtx->is_symmetric = 0; // TODO: not sure
+    coo_mat->values = std::vector<double>(val, val + nnz);
+    coo_mat->I = std::vector<int>(row, row + nnz);
+    coo_mat->J = std::vector<int>(col, col + nnz);
+    coo_mat->n_rows = nrows;
+    coo_mat->n_cols = ncols;
+    coo_mat->nnz = nnz;
+    coo_mat->is_sorted = 1; // TODO: not sure
+    coo_mat->is_symmetric = 0; // TODO: not sure
 
     delete[] val;
     delete[] row;
@@ -230,7 +230,7 @@ void read_mtx(
 //}
 
 void split_upper_lower_diagonal(
-    COOMtxData *full_coo_mtx,
+    COOMtxData *coo_mat,
     COOMtxData *U_coo_mtx,
     COOMtxData *L_coo_mtx,
     std::vector<double> *D_coo_vec
@@ -241,42 +241,42 @@ void split_upper_lower_diagonal(
     int D_coo_vec_count = 0;
 
     // Force same dimensions for consistency
-    U_coo_mtx->n_rows = full_coo_mtx->n_rows;
-    U_coo_mtx->n_cols = full_coo_mtx->n_cols;
-    U_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
+    U_coo_mtx->n_rows = coo_mat->n_rows;
+    U_coo_mtx->n_cols = coo_mat->n_cols;
+    U_coo_mtx->is_sorted = coo_mat->is_sorted;
     U_coo_mtx->is_symmetric = false;
-    L_coo_mtx->n_rows = full_coo_mtx->n_rows;
-    L_coo_mtx->n_cols = full_coo_mtx->n_cols;
-    L_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
+    L_coo_mtx->n_rows = coo_mat->n_rows;
+    L_coo_mtx->n_cols = coo_mat->n_cols;
+    L_coo_mtx->is_sorted = coo_mat->is_sorted;
     L_coo_mtx->is_symmetric = false;
 
-    for(int nz_idx = 0; nz_idx < full_coo_mtx->nnz; ++nz_idx){
+    for(int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
         // If column and row less than i, this nz is in the L matrix
-        if(full_coo_mtx->J[nz_idx] < full_coo_mtx->I[nz_idx]){
+        if(coo_mat->J[nz_idx] < coo_mat->I[nz_idx]){
             // Copy element to lower matrix
-            L_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
-            L_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
-            L_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
+            L_coo_mtx->I.push_back(coo_mat->I[nz_idx]);
+            L_coo_mtx->J.push_back(coo_mat->J[nz_idx]);
+            L_coo_mtx->values.push_back(coo_mat->values[nz_idx]);
             ++L_coo_mtx->nnz;
-            // std::cout << full_coo_mtx->values[nz_idx] << " sent to lower matrix" << std::endl;
+            // std::cout << coo_mat->values[nz_idx] << " sent to lower matrix" << std::endl;
         }
-        else if(full_coo_mtx->J[nz_idx] > full_coo_mtx->I[nz_idx]){
+        else if(coo_mat->J[nz_idx] > coo_mat->I[nz_idx]){
             // Copy element to upper matrix
-            U_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
-            U_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
-            U_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
+            U_coo_mtx->I.push_back(coo_mat->I[nz_idx]);
+            U_coo_mtx->J.push_back(coo_mat->J[nz_idx]);
+            U_coo_mtx->values.push_back(coo_mat->values[nz_idx]);
             ++U_coo_mtx->nnz;
-            // std::cout << full_coo_mtx->values[nz_idx] << " sent to upper matrix" << std::endl;
+            // std::cout << coo_mat->values[nz_idx] << " sent to upper matrix" << std::endl;
         }
-        else if(full_coo_mtx->I[nz_idx] == full_coo_mtx->J[nz_idx]){
+        else if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
             // Copy element to vector representing diagonal matrix
             // NOTE: Don't need push_back because we know the size
-            if(abs(full_coo_mtx->values[nz_idx]) < 1e-15 && !explitit_zero_warning_flag){ // NOTE: error tolerance too tight?
+            if(abs(coo_mat->values[nz_idx]) < 1e-15 && !explitit_zero_warning_flag){ // NOTE: error tolerance too tight?
                 printf("WARNING: split_upper_lower_diagonal: explicit zero detected on diagonal at nz_idx %i.\n"
-                        "row: %i, col: %i, val: %f.\n", nz_idx, full_coo_mtx->I[nz_idx], full_coo_mtx->J[nz_idx], full_coo_mtx->values[nz_idx]);
+                        "row: %i, col: %i, val: %f.\n", nz_idx, coo_mat->I[nz_idx], coo_mat->J[nz_idx], coo_mat->values[nz_idx]);
                 explitit_zero_warning_flag = true;
             }
-            (*D_coo_vec)[D_coo_vec_count] = full_coo_mtx->values[nz_idx];
+            (*D_coo_vec)[D_coo_vec_count] = coo_mat->values[nz_idx];
             ++D_coo_vec_count;
         }
         else{
@@ -286,10 +286,10 @@ void split_upper_lower_diagonal(
     }
 
     // Sanity checks; TODO: Make optional
-    // All elements from full_coo_mtx need to be accounted for
+    // All elements from coo_mat need to be accounted for
     int copied_elems_count = L_coo_mtx->nnz + U_coo_mtx->nnz + D_coo_vec_count; 
-    if(copied_elems_count != full_coo_mtx->nnz){
-        printf("ERROR: split_upper_lower_diagonal: only %i out of %i elements were copied from full_coo_mtx.\n", copied_elems_count, full_coo_mtx->nnz);
+    if(copied_elems_count != coo_mat->nnz){
+        printf("ERROR: split_upper_lower_diagonal: only %i out of %i elements were copied from coo_mat.\n", copied_elems_count, coo_mat->nnz);
         exit(1);
     }
 }
@@ -359,16 +359,16 @@ double infty_mat_norm(
  is the infinity norm: ||A*x_new-b||_infty */
 double calc_residual(
     CRSMtxData *crs_mat,
-    std::vector<double> *x_new,
+    std::vector<double> *x,
     std::vector<double> *b
 ){
     int n_cols = crs_mat->n_cols;
 
-    std::vector<double> A_x_new(n_cols); 
+    std::vector<double> A_x(n_cols); 
 
-    spmv_crs(&A_x_new, crs_mat, x_new);
+    spmv_crs(&A_x, crs_mat, x);
 
-    std::vector<double> A_x_new_minus_b(n_cols);
+    std::vector<double> A_x_minus_b(n_cols);
     std::vector<double> neg_b(n_cols);
 
     neg_b = *b;
@@ -379,51 +379,49 @@ double calc_residual(
         std::negate<double>()
     );
 
-    sum_vectors(&A_x_new_minus_b, &A_x_new, &neg_b);
+    sum_vectors(&A_x_minus_b, &A_x, &neg_b);
 
-    return infty_vec_norm(&A_x_new_minus_b);
+    return infty_vec_norm(&A_x_minus_b);
 }
 
 void residuals_output(
     bool print_residuals,
     std::vector<double> *residuals_vec,
-    int iter_count
+    LoopParams loop_params
 ){
-    for(int i = 0; i < iter_count; ++i){
-        std::cout << "||A*x_" << i << " - b||_infty = " << std::setprecision(16) << (*residuals_vec)[i] << std::endl;
+    for(int i = 0; i < loop_params.residual_count; ++i){
+        std::cout << "||A*x_" << i*loop_params.residual_check_len << " - b||_infty = " << std::setprecision(16) << (*residuals_vec)[i] << std::endl;
     }
 }
 
 void summary_output(
-    COOMtxData *full_coo_mtx,
+    COOMtxData *coo_mat,
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *residuals_vec,
     std::string *solver_type,
-    int max_iters,
-    bool convergence_flag,
-    bool print_residuals,
-    int iter_count,
+    LoopParams loop_params,
+    Flags flags,
     double total_time_elapsed,
-    double calc_time_elapsed,
-    double tol
+    double calc_time_elapsed
 ){
-    if(convergence_flag){
+    if(flags.convergence_flag){
         // x_new ~ A^{-1}b
-        std::cout << "\n" << *solver_type << " solver converged in: " << iter_count << " iterations." << std::endl;
+        std::cout << "\n" << *solver_type << " solver converged in: " << loop_params.iter_count << " iterations." << std::endl;
     }
     else{
         // x_new !~ A^{-1}b
-        std::cout << "\n" << *solver_type << " solver did not converge after " << max_iters << " iterations." << std::endl;
+        std::cout << "\n" << *solver_type << " solver did not converge after " << loop_params.max_iters << " iterations." << std::endl;
     }
     std::cout << "The residual of the final iteration is: ||A*x_star - b||_infty = " <<
-    std::setprecision(16) << (*residuals_vec)[iter_count] << ".\n";
+    std::scientific << (*residuals_vec)[loop_params.residual_count] << ".\n";
+    std::cout << "The stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
     std::cout << "The total elapsed time was: " << total_time_elapsed << "[s]." << std::endl;
     std::cout << "Out of which, the pre-processing time was: " << total_time_elapsed - calc_time_elapsed <<
     "[s], and the computation time was: " << calc_time_elapsed << "[s]." <<std::endl;
 
-    if(print_residuals){
-        residuals_output(print_residuals, residuals_vec, iter_count);
+    if(flags.print_residuals){
+        residuals_output(flags.print_residuals, residuals_vec, loop_params);
     }
 }
 
@@ -488,6 +486,7 @@ void jacobi_iteration(
     double diag_elem;
     double sum;
 
+    #pragma omp parallel for schedule (static)
     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
         sum = 0;
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
@@ -554,36 +553,18 @@ void jacobi_solve(
 {
     int ncols = crs_mat->n_cols;
     double residual;
-    double stopping_criteria;
 
-    // Declare structs
-    // std::vector<double> D_coo_vec(ncols);
-    // COOMtxData L_coo_mtx, U_coo_mtx, full_coo_L_plus_U_mtx;
-
-    // // Split COO matrix 
-    // split_upper_lower_diagonal(full_crs_mtx, &U_coo_mtx, &L_coo_mtx, &D_coo_vec);
-
-    // // NOTE: The following computations can be performed outside of the main loop, since they are not changing
-    // // Form L+U matrix-matrix elementwise sum 
-    // sum_matrices(&full_coo_L_plus_U_mtx, &U_coo_mtx, &L_coo_mtx); 
-
-    // // Form -D^{-1}
-    // std::vector<double> neg_D_inv_coo_vec(ncols);
-    // std::vector<double> D_inv_coo_vec(ncols);
-    // gen_neg_inv(&neg_D_inv_coo_vec, &D_inv_coo_vec, &D_coo_vec);
-    
     if(flags->print_iters){
         iter_output(x_old, loop_params->iter_count);
         printf("\n");
     }
-    // std::cout << "x_old vector:" << std::endl;
-    // for(int i = 0; i < full_coo_mtx.n_cols; ++i){
-    //     std::cout << x_old[i] << std::endl;
-    // }
 
-    // Precalculate what we can of stopping criteria
-    double infty_norm_A = infty_mat_norm(crs_mat);
-    double infty_norm_b = infty_vec_norm(b);
+#ifdef DEBUG_MODE
+    std::cout << "x_old vector:" << std::endl;
+    for(int i = 0; i < coo_mat.n_cols; ++i){
+        std::cout << x_old[i] << std::endl;
+    }
+#endif
 
     // Begin timer
     struct timeval calc_time_start, calc_time_end;
@@ -592,65 +573,145 @@ void jacobi_solve(
     // Perform Jacobi iterations until error cond. satisfied
     // Using relation: x_new = -D^{-1}*(L + U)*x_old + D^{-1}*b
     // After Jacobi iteration loop, x_new ~ A^{-1}b
-    (*residuals_vec)[0] = calc_residual(crs_mat, x_old, b);
-
-    // Tasking candidate
+    // NOTE: Tasking candidate
     do{
         jacobi_iteration(crs_mat, b, x_old, x_new);
-        ++loop_params->iter_count;
-        residual = calc_residual(crs_mat, x_new, b);
-        stopping_criteria = loop_params->tol * (infty_norm_A * infty_vec_norm(x_new) + infty_norm_b);
-        if(flags->print_residuals){
-            (*residuals_vec)[loop_params->iter_count] = residual;
+        
+        if (loop_params->iter_count % loop_params->residual_check_len == 0){
+            
+            // Record residual every "residual_check_len" iterations
+            residual = calc_residual(crs_mat, x_new, b);
+            (*residuals_vec)[loop_params->residual_count] = residual;
+            ++loop_params->residual_count;
+
+            if(flags->print_iters){
+                iter_output(x_new, loop_params->iter_count);
+            }  
         }
-        if(flags->print_iters){
-            iter_output(x_new, loop_params->iter_count);
-            // printf("The residual is %f.\n\n", residual);
-        }  
-        if(loop_params->iter_count >= loop_params->max_iters){
-            flags->convergence_flag = false;
-            break;
-        }
+
 #ifdef DEBUG_MODE
         std::cout << "[";
         for(int i = 0; i < x_new->size(); ++i){
             std::cout << (*x_new)[i] << ", ";
         }
         std::cout << "]" << std::endl;
-#endif
-        std::swap(*x_new, *x_old);
-#ifdef DEBUG_MODE    
+  
         std::cout << "residual: " << residual << std::endl;
-        std::cout << "stopping_criteria: " << stopping_criteria << std::endl; 
-#endif    
-    } while(residual > stopping_criteria);
+        std::cout << "stopping_criteria: " << loop_params->stopping_criteria << std::endl; 
+#endif  
+    
+        std::swap(*x_new, *x_old);
+
+        ++loop_params->iter_count;
+
+    } while(residual > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
+
+    flags->convergence_flag = (residual <= loop_params->stopping_criteria) ? true : false;
 
     std::swap(*x_old, *x_star);
+
+    // Record final residual with approximated solution vector x
+    (*residuals_vec)[loop_params->residual_count] = calc_residual(crs_mat, x_star, b);
 
     // End timer
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);
 }
 
-// void gs_iteration(
-//     COOMtxData *full_coo_L_plus_U_mtx,
-//     std::vector<double> *D_inv_coo_vec,
-//     std::vector<double> *neg_D_inv_coo_vec,
-//     std::vector<double> *b,
-//     std::vector<double> *x_old,
-//     std::vector<double> *x_new
-// ){}
+void gs_iteration(
+    CRSMtxData *crs_mat,
+    std::vector<double> *b,
+    std::vector<double> *x
+){
+    double diag_elem;
+    double sum;
 
-// void gs_solve(
-//     std::vector<double> *x_old,
-//     std::vector<double> *x_new,
-//     std::vector<double> *x_star,
-//     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
-//     std::vector<double> *residuals_vec,
-//     double *calc_time_elapsed,
-//     Flags *flags,
-//     LoopParams *loop_params
-// ){}
+    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
+        sum = 0;
+        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+            if(row_idx == crs_mat->col[nz_idx]){
+                diag_elem = crs_mat->val[nz_idx];
+            }
+            else{
+                sum += crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]];
+            }
+        }
+        (*x)[row_idx] = ((*b)[row_idx] - sum) / diag_elem;
+    }
+}
+
+void gs_solve(
+    std::vector<double> *x,
+    std::vector<double> *x_star,
+    std::vector<double> *b,
+    CRSMtxData *crs_mat,
+    std::vector<double> *residuals_vec,
+    double *calc_time_elapsed,
+    Flags *flags,
+    LoopParams *loop_params
+){
+        int ncols = crs_mat->n_cols;
+    double residual;
+
+    if(flags->print_iters){
+        iter_output(x, loop_params->iter_count);
+        printf("\n");
+    }
+
+#ifdef DEBUG_MODE
+    std::cout << "x_old vector:" << std::endl;
+    for(int i = 0; i < coo_mat.n_cols; ++i){
+        std::cout << x_old[i] << std::endl;
+    }
+#endif
+
+    // Begin timer
+    struct timeval calc_time_start, calc_time_end;
+    start_time(&calc_time_start);
+
+    // Perform Jacobi iterations until error cond. satisfied
+    // Using relation: x_new = -D^{-1}*(L + U)*x_old + D^{-1}*b
+    // After Jacobi iteration loop, x_new ~ A^{-1}b
+    // NOTE: Tasking candidate
+    do{
+        gs_iteration(crs_mat, b, x);
+        
+        if (loop_params->iter_count % loop_params->residual_check_len == 0){
+            
+            // Record residual every "residual_check_len" iterations
+            residual = calc_residual(crs_mat, x, b);
+            (*residuals_vec)[loop_params->residual_count] = residual;
+            ++loop_params->residual_count;
+
+            if(flags->print_iters){
+                iter_output(x, loop_params->iter_count);
+            }  
+        }
+
+#ifdef DEBUG_MODE
+        std::cout << "[";
+        for(int i = 0; i < x->size(); ++i){
+            std::cout << (*x)[i] << ", ";
+        }
+        std::cout << "]" << std::endl;
+  
+        std::cout << "residual: " << residual << std::endl;
+        std::cout << "stopping_criteria: " << loop_params->stopping_criteria << std::endl; 
+#endif  
+    
+        ++loop_params->iter_count;
+
+    } while(residual > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
+
+    flags->convergence_flag = (residual <= loop_params->stopping_criteria) ? true : false;
+
+    std::swap(*x, *x_star);
+
+    // Record final residual with approximated solution vector x
+    (*residuals_vec)[loop_params->residual_count] = calc_residual(crs_mat, x_star, b);
+
+    // End timer
+    (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);
+}
 
 // void trivial_iteration(
 //     COOMtxData *full_coo_L_plus_U_mtx,
@@ -666,7 +727,7 @@ void jacobi_solve(
 //     std::vector<double> *x_new,
 //     std::vector<double> *x_star,
 //     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
+//     COOMtxData *coo_mat,
 //     std::vector<double> *residuals_vec,
 //     double *calc_time_elapsed,
 //     Flags *flags,
@@ -682,53 +743,19 @@ void jacobi_solve(
 //     std::vector<double> *x_new
 // ){}
 
-// void initialize_with_zeros_COO(
-//     COOMtxData *full_coo_mtx,
-//     int nrows,
-//     int ncols
-// ){
-//     full_coo_mtx->n_rows = nrows;
-//     // int n_rows{};
-
-//     full_coo_mtx->n_cols = ncols;
-//     // int n_cols{};
-
-//     full_coo_mtx->nnz = 0;
-//     // int nnz{};
-
-//     full_coo_mtx->is_sorted = true;
-//     // bool is_sorted{}; = 1;
-
-//     full_coo_mtx->is_symmetric = false;
-//     // bool is_symmetric{}; = 1;
-
-    
-//     std::vector<double> sized_zero_vec(nrows*ncols, 0.0);
-
-//     full_coo_mtx->I = ;
-//     // std::vector<int> J;
-
-//     full_coo_mtx->J = ;
-//     // std::vector<int> J;
-
-//     full_coo_mtx->values = ;
-//     // std::vector<double> values;
-
-// }
-
 // void FOM_solve(
 //     std::vector<double> *x_old,
 //     std::vector<double> *x_new,
 //     std::vector<double> *x_star,
 //     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
+//     COOMtxData *coo_mat,
 //     std::vector<double> *residuals_vec,
 //     double *calc_time_elapsed,
 //     Flags *flags,
 //     LoopParams *loop_params
 // ){
 //     // // This does not seem like an"iterative" method
-//     // int ncols = full_coo_mtx->n_cols;
+//     // int ncols = coo_mat->n_cols;
 //     // double residual;
 
 //     // // Declare structs

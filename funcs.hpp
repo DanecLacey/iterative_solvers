@@ -18,7 +18,7 @@ void assign_cli_inputs(
 
 void read_mtx(
     const std::string matrix_file_name,
-    COOMtxData *full_coo_mtx
+    COOMtxData *coo_mat
     );
 
 // TODO
@@ -26,14 +26,14 @@ void read_mtx(
 //        );
 
 void split_upper_lower_diagonal(
-    COOMtxData *full_coo_mtx,
-    COOMtxData *U_coo_mtx,
-    COOMtxData *L_coo_mtx,
+    COOMtxData *coo_mat,
+    COOMtxData *U_coo_mat,
+    COOMtxData *L_coo_mat,
     std::vector<double> *D_inv_coo_vec
 );
 
 void icr_vals(
-    COOMtxData *full_coo_mtx
+    COOMtxData *coo_mat
 );
 
 inline void sort_perm(int *arr, int *perm, int len, bool rev=false);
@@ -46,24 +46,21 @@ void generate_vector(
 );
 
 double calc_residual(
-    CRSMtxData *full_crs_mtx,
+    CRSMtxData *crs_mat,
     std::vector<double> *x_new,
     std::vector<double> *b
 );
 
 void summary_output(
-    COOMtxData *full_coo_mtx,
+    COOMtxData *coo_mat,
     std::vector<double> *x_star,
     std::vector<double> *b,
-    std::vector<double> *errors_vec,
+    std::vector<double> *residuals_vec,
     std::string *solver_type,
-    int max_iters,
-    bool convergence_flag,
-    bool print_residuals,
-    int iter_count,
+    LoopParams loop_params,
+    Flags flags,
     double total_time_elapsed,
-    double calc_time_elapsed,
-    double tol
+    double calc_time_elapsed
 );
 
 void iter_output(
@@ -87,7 +84,7 @@ double end_time(
 );
 
 void jacobi_iteration(
-    CRSMtxData *full_crs_mtx,
+    CRSMtxData *crs_mat,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new
@@ -98,33 +95,29 @@ void jacobi_solve(
     std::vector<double> *x_new,
     std::vector<double> *x_star,
     std::vector<double> *b,
-    CRSMtxData *full_crs_mtx,
+    CRSMtxData *crs_mat,
     std::vector<double> *residuals_vec,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 );
 
-// void gs_iteration(
-//     COOMtxData *full_coo_L_plus_U_mtx,
-//     std::vector<double> *D_inv_coo_vec,
-//     std::vector<double> *neg_D_inv_coo_vec,
-//     std::vector<double> *b,
-//     std::vector<double> *x_old,
-//     std::vector<double> *x_new
-// );
+void gs_iteration(
+    CRSMtxData *crs_mat,
+    std::vector<double> *b,
+    std::vector<double> *x
+);
 
-// void gs_solve(
-//     std::vector<double> *x_old,
-//     std::vector<double> *x_new,
-//     std::vector<double> *x_star,
-//     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
-//     std::vector<double> *residuals_vec,
-//     double *calc_time_elapsed,
-//     Flags *flags,
-//     LoopParams *loop_params
-// );
+void gs_solve(
+    std::vector<double> *x,
+    std::vector<double> *x_star,
+    std::vector<double> *b,
+    CRSMtxData *crs_mat,
+    std::vector<double> *residuals_vec,
+    double *calc_time_elapsed,
+    Flags *flags,
+    LoopParams *loop_params
+);
 
 // void trivial_iteration(
 //     COOMtxData *full_coo_L_plus_U_mtx,
@@ -140,7 +133,7 @@ void jacobi_solve(
 //     std::vector<double> *x_new,
 //     std::vector<double> *x_star,
 //     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
+//     COOMtxData *coo_mat,
 //     std::vector<double> *residuals_vec,
 //     double *calc_time_elapsed,
 //     Flags *flags,
@@ -161,7 +154,7 @@ void jacobi_solve(
 //     std::vector<double> *x_new,
 //     std::vector<double> *x_star,
 //     std::vector<double> *b,
-//     COOMtxData *full_coo_mtx,
+//     COOMtxData *coo_mat,
 //     std::vector<double> *residuals_vec,
 //     double *calc_time_elapsed,
 //     Flags *flags,

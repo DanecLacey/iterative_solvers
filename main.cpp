@@ -18,39 +18,42 @@ void solve(
     Flags *flags,
     LoopParams *loop_params
 ){
-    int ncols = crs_mat->n_cols;
+    int n_cols = crs_mat->n_cols;
 
     // Declare common structs
-    std::vector<double> x_new(ncols);
-    std::vector<double> x_old(ncols);
+    std::vector<double> x_new(n_cols);
+    std::vector<double> x_old(n_cols);
 
     // Pre-allocate vector sizes
-    x_star->resize(ncols);
-    b->resize(ncols);
-
+    x_star->resize(n_cols);
+    b->resize(n_cols);
 
     // TODO: What are the ramifications of having x and b different scales than the data?
     // And how to make the "same scale" as data?
     // Make b vector
     // NOTE: Currently using random vector b with elements \in (0, 10)
-    // generate_vector(b, ncols, true, NULL);
-    generate_vector(b, ncols, false, 1);
+    generate_vector(b, n_cols, false, 1);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
     // NOTE: Currently taking the 1 vector as starting guess
-    generate_vector(&x_old, ncols, false, 2);
+    generate_vector(&x_old, n_cols, false, 2);
+
+    // Precalculate stopping criteria
+    double infty_norm_A = infty_mat_norm(crs_mat);
+    double infty_norm_b = infty_vec_norm(b);
+    loop_params->stopping_criteria = loop_params->tol * calc_residual(crs_mat, &x_old, b);
 
     if ((*solver_type) == "jacobi"){
         jacobi_solve(&x_old, &x_new, x_star, b, crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
     }
-    // else if ((*solver_type) == "gauss-seidel"){
-    //     gs_solve(&x_old, &x_new, x_star, b, full_crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
-    // }
+    else if ((*solver_type) == "gauss-seidel"){
+        gs_solve(&x_old, x_star, b, crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
+    }
     // else if ((*solver_type) == "trivial"){
     //     trivial_solve(&x_old, &x_new, x_star, b, full_crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
     // }
-    else if ((*solver_type) == "FOM"){
+    // else if ((*solver_type) == "FOM"){
     // FOM
     // 0. Choose max subspace dim m
     // 1. Initialize r_0 = b - A * x_0, beta = || r_0 ||_2, v_1 = r_0/beta, and H_m = 0
@@ -65,7 +68,7 @@ void solve(
     // 9. Compute y_m = H_m^{-1}(beta * e_1), x_m = x_0 + V_m * y_m
         // TODO
         // FOM_solve(&x_old, &x_new, x_star, b, full_coo_mtx, residuals_vec, calc_time_elapsed, flags, loop_params);
-    }
+    // }
     else{
         printf("ERROR: solve: This solver method is not implemented yet.\n");
         exit(1);
@@ -82,12 +85,8 @@ int main(int argc, char *argv[]){
      *          x_k+1 = D^{-1} * (b - (L + U) * x_k)
      *      Gauss-Seidel Iteration
      *          x_k+1 = (D+L)^{-1} * (b - R * x_k) 
-     *      Trivial Iteration
-     *          x_k+1 = (I - A) * x_k + b
-     * until (Dongarra) tolerance 1.
-     *      "||A * x_k - b|| < tol * (||A|| * ||x_k|| + ||b||)"
-     * or (Ketchup) tolerance 2.
-     *      "|| (x_new - x_old) / x_old || < tol"
+     * until tolerance
+     *      "||b - A * x_k|| / ||b - A * x_0|| < tol"
      * is reached
      * 4. Optionally:
      *      Report pre-processing and calculation times
@@ -105,17 +104,21 @@ int main(int argc, char *argv[]){
         true, // convergence_flag. TODO: really shouldn't be here
         true // export simple error per iteration in CURRDIR/errors.txt
     };
+
     LoopParams loop_params{
-        0, // current iteration count
+        0, // init iteration count
+        0, // init residuals count
+        5, // calculate residual every n iterations
         500, // maximum iteration count
-        1e-6// tolerance to stop iterations
+        0.0, // init stopping criteria
+        1e-15// tolerance to stop iterations
     };
 
     COOMtxData *coo_mat = new COOMtxData;
     CRSMtxData *crs_mat = new CRSMtxData;
 
     std::vector<double> x_star, b;
-    std::vector<double> residuals_vec(loop_params.max_iters);
+    std::vector<double> residuals_vec(loop_params.max_iters / loop_params.residual_check_len + 1);
     double total_time_elapsed;
     double calc_time_elapsed;
 
@@ -137,7 +140,7 @@ int main(int argc, char *argv[]){
     total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
     if(flags.print_summary){
-        summary_output(coo_mat, &x_star, &b, &residuals_vec, &solver_type, loop_params.max_iters, flags.convergence_flag, flags.print_residuals, loop_params.iter_count, total_time_elapsed, calc_time_elapsed, loop_params.tol);
+        summary_output(coo_mat, &x_star, &b, &residuals_vec, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
     }
     if(flags.export_errors){
         write_residuals_to_file(&residuals_vec);

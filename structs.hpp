@@ -18,7 +18,10 @@ struct Flags
 struct LoopParams
 {
     int iter_count;
+    int residual_count;
+    int residual_check_len;
     int max_iters;
+    double stopping_criteria;
     double tol;
 };
 

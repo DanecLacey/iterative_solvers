@@ -1,80 +1,124 @@
-CCX=g++
-CFLAGS=-I.
+COMPILER=gcc
+
 DEBUG_MODE = 0
+USE_LIKWID = 0
+
+# TODO
+# USE_METIS = 1
+# USE_SPMP = 0
+
+
+# compiler options
+ifeq ($(COMPILER),gcc)
+  CXX       = g++
+  OPT_LEVEL = -Ofast
+  OPT_ARCH  = -march=native
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+endif
+
+ifeq ($(COMPILER),icc)
+  CXX       = icpc
+  OPT_LEVEL = -Ofast
+  OPT_ARCH  = -xhost
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+endif
+
+ifeq ($(COMPILER),icx)
+  CXX       = icpx
+  MPICXX     = mpiicpc -cxx=icpx
+  OPT_LEVEL = -Ofast
+  OPT_ARCH  = -xhost
+  AVX512_fix= #-Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
+
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH)
+endif
 
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
 endif
 
+ifeq ($(USE_LIKWID),1)
+  # !!! include your own file paths !!! (I'm just loading module, which comes with file paths)
+  # LIKWID_INC =
+  # LIKWID_LIB = 
+  ifeq ($(LIKWID_INC),)
+    $(error USE_LIKWID selected, but no include path given in LIKWID_INC)
+  endif
+  ifeq ($(LIKWID_LIB),)
+    $(error USE_LIKWID selected, but no library path given in LIKWID_LIB)
+  endif
+  CXXFLAGS  += -DUSE_LIKWID -DLIKWID_PERFMON $(LIKWID_INC) $(LIKWID_LIB) -llikwid
+endif
+
 main: main.o funcs.o kernels.o mmio.o
-	$(CCX) -o main main.o funcs.o kernels.o mmio.o
+	$(CXX) $(CXXFLAGS) -o main main.o funcs.o kernels.o mmio.o
 	-rm *.o
 	
 # main only depends on funcs, mmio, and structs header, not kernels
 main.o: main.cpp funcs.hpp
-	$(CCX) $(DEBUGFLAGS) -c main.cpp -o main.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c main.cpp -o main.o
 	
 # funcs depends on kernels
 funcs.o: funcs.cpp funcs.hpp kernels.o mmio.o
-	$(CCX) $(DEBUGFLAGS) -c funcs.cpp -o funcs.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c funcs.cpp -o funcs.o
 
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
-	$(CCX) $(DEBUGFLAGS) -c kernels.cpp -o kernels.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c kernels.cpp -o kernels.o
 
 # only depends on "mmio" src and header
 mmio.o: mmio.cpp mmio.h
-	$(CCX) $(DEBUGFLAGS) -c mmio.cpp -o mmio.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c mmio.cpp -o mmio.o
 
 #################### Test Suite ####################
 TEST_INC_DIR = /home/danel/iterative_solvers/splitting_type_solvers
 
 tests: test_suite/catch.o test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.hpp 
-	$(CCX) -I$(TEST_INC_DIR) test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.o funcs.o mmio.o kernels.o -o test_suite/tests
+	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.o funcs.o mmio.o kernels.o -o test_suite/tests
 	# -rm *.o
 	# -rm test_suite/*.o
 
 test_suite/catch.o: test_suite/catch.cpp test_suite/catch.hpp
-	$(CCX) -I$(TEST_INC_DIR) -c test_suite/catch.cpp -o test_suite/catch.o
+	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/catch.cpp -o test_suite/catch.o
 
 # Also need funcs.o here, since we are testing the function implementations
 test_suite/mtx_tests.o: test_suite/mtx_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-	$(CCX) -I$(TEST_INC_DIR) -c test_suite/mtx_tests.cpp -o test_suite/mtx_tests.o
+	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/mtx_tests.cpp -o test_suite/mtx_tests.o
 
 test_suite/other_tests.o: test_suite/other_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-	$(CCX) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
+	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
 
 # test_suite/other_tests.o: test_suite/other_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-# 	$(CCX) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
+# 	$(CXX) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
 
 test_suite/test_data.o: test_suite/test_data.cpp
-	$(CCX) -I$(TEST_INC_DIR) -c test_suite/test_data.cpp -o test_suite/test_data.o
+	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/test_data.cpp -o test_suite/test_data.o
 
 # funcs.o: funcs.cpp funcs.hpp kernels.o structs.hpp kernels.hpp mmio.o
-# 	$(CCX) -c funcs.cpp structs.hpp kernels.cpp kernels.hpp -o funcs.o
+# 	$(CXX) -c funcs.cpp structs.hpp kernels.cpp kernels.hpp -o funcs.o
 
 ####################################################
 
 # #################### Profiling ####################
 # profs: main.o funcs.o kernels.o mmio.o
-# 	$(CCX) -pg -o main_gprof main.o funcs.o kernels.o mmio.o
+# 	$(CXX) -pg -o main_gprof main.o funcs.o kernels.o mmio.o
 # 	-rm *.o
 	
 # # main only depends on funcs, mmio, and structs header, not kernels
 # main.o: main.cpp funcs.hpp structs.hpp
-# 	$(CCX) -pg -c main.cpp -o main.o
+# 	$(CXX) -pg -c main.cpp -o main.o
 	
 # # funcs depends on kernels
 # funcs.o: funcs.cpp funcs.hpp kernels.o structs.hpp kernels.hpp mmio.o
-# 	$(CCX) -pg -c funcs.cpp -o funcs.o
+# 	$(CXX) -pg -c funcs.cpp -o funcs.o
 
 # # only depends on "kernels" src and header, and structs header
 # kernels.o: kernels.cpp kernels.hpp structs.hpp
-# 	$(CCX) -pg -c kernels.cpp -o kernels.o
+# 	$(CXX) -pg -c kernels.cpp -o kernels.o
 
 # # only depends on "mmio" src and header
 # mmio.o: mmio.cpp mmio.h
-# 	$(CCX) -pg -c mmio.cpp -o mmio.o
+# 	$(CXX) -pg -c mmio.cpp -o mmio.o
 
 # ####################################################
 
