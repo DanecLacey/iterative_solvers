@@ -4,11 +4,18 @@
 #include <algorithm>
 #include <sys/time.h>
 
-// #include "structs.hpp"
-#include "funcs.hpp"
+#ifdef USE_EIGEN
+#include <Eigen/SparseLU>
+#include <unsupported/Eigen/SparseExtra>
+#endif
+
+#include "utility_funcs.hpp"
+#include "io_funcs.hpp"
+#include "solvers.hpp"
 #include "mmio.h"
 
 void solve(
+    COOMtxData *coo_mat,
     CRSMtxData *crs_mat,
     std::string *solver_type,
     std::vector<double> *x_star,
@@ -18,7 +25,7 @@ void solve(
     Flags *flags,
     LoopParams *loop_params
 ){
-    int n_cols = crs_mat->n_cols;
+    int n_cols = coo_mat->n_cols;
 
     // Declare common structs
     std::vector<double> x_new(n_cols);
@@ -28,20 +35,15 @@ void solve(
     x_star->resize(n_cols);
     b->resize(n_cols);
 
-    // TODO: What are the ramifications of having x and b different scales than the data?
-    // And how to make the "same scale" as data?
+    // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
-    // NOTE: Currently using random vector b with elements \in (0, 10)
-    generate_vector(b, n_cols, false, 1);
+    generate_vector(b, n_cols, false, loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
-    // NOTE: Currently taking the 1 vector as starting guess
-    generate_vector(&x_old, n_cols, false, 2);
+    generate_vector(&x_old, n_cols, false, loop_params->init_x);
 
     // Precalculate stopping criteria
-    double infty_norm_A = infty_mat_norm(crs_mat);
-    double infty_norm_b = infty_vec_norm(b);
     loop_params->stopping_criteria = loop_params->tol * calc_residual(crs_mat, &x_old, b);
 
     if ((*solver_type) == "jacobi"){
@@ -50,25 +52,6 @@ void solve(
     else if ((*solver_type) == "gauss-seidel"){
         gs_solve(&x_old, x_star, b, crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
     }
-    // else if ((*solver_type) == "trivial"){
-    //     trivial_solve(&x_old, &x_new, x_star, b, full_crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
-    // }
-    // else if ((*solver_type) == "FOM"){
-    // FOM
-    // 0. Choose max subspace dim m
-    // 1. Initialize r_0 = b - A * x_0, beta = || r_0 ||_2, v_1 = r_0/beta, and H_m = 0
-    // 2. For j = 1,2,...,m
-    // 3.   Compute w_j = A * v_j
-    // 4.   For i = 1,...,j
-    // 5.       h_ij = v_i^T * w_j
-    // 6.       w_j = w_j - h_ij * v_i
-    // 7.   Compute h_{j+1},j = || w_j ||_2 (if h_{j+1},j = 0, set m = j, goto 9.)
-    // 8.   Compute v_{j+1} = w_j/h_{j+1},j
-    // 8.1  Place into V_m[j+1]
-    // 9. Compute y_m = H_m^{-1}(beta * e_1), x_m = x_0 + V_m * y_m
-        // TODO
-        // FOM_solve(&x_old, &x_new, x_star, b, full_coo_mtx, residuals_vec, calc_time_elapsed, flags, loop_params);
-    // }
     else{
         printf("ERROR: solve: This solver method is not implemented yet.\n");
         exit(1);
@@ -102,16 +85,20 @@ int main(int argc, char *argv[]){
         true, // print_summary
         true, // print_residuals
         true, // convergence_flag. TODO: really shouldn't be here
-        true // export simple error per iteration in CURRDIR/errors.txt
+        true, // export simple error per iteration in CURRDIR/errors.txt
+        true, // apply left Jacobi preconditioner to A and b
+        false // Compare to SparseLU direct solver
     };
 
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
-        5, // calculate residual every n iterations
-        500, // maximum iteration count
+        50, // calculate residual every n iterations
+        1000, // maximum iteration count
         0.0, // init stopping criteria
-        1e-15// tolerance to stop iterations
+        1e-15, // tolerance to stop iterations
+        1.1, // init value for b
+        0.0 // init value for x
     };
 
     COOMtxData *coo_mat = new COOMtxData;
@@ -127,17 +114,21 @@ int main(int argc, char *argv[]){
 
     // Read COO format mtx file
     read_mtx(matrix_file_name, coo_mat);
-
-    // TODO
-    // preprocessing plus timers
+         
     coo_mat->convert_to_crs(crs_mat);
 
-    // Solve Ax=b given a random b vector, and time it
+    // Collect preprocessing time
     start_time(&total_time_start);
+    // TODO, more preprocessing
 
-    solve(crs_mat, &solver_type, &x_star, &b, &residuals_vec, &calc_time_elapsed, &flags, &loop_params);
+    // Main solver routine
+    solve(coo_mat, crs_mat, &solver_type, &x_star, &b, &residuals_vec, &calc_time_elapsed, &flags, &loop_params);
 
     total_time_elapsed = end_time(&total_time_start, &total_time_end);
+
+    if(flags.compare_direct){
+        compare_with_direct(crs_mat, matrix_file_name, loop_params, &x_star, residuals_vec[loop_params.residual_count]);
+    }
 
     if(flags.print_summary){
         summary_output(coo_mat, &x_star, &b, &residuals_vec, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
@@ -146,8 +137,8 @@ int main(int argc, char *argv[]){
         write_residuals_to_file(&residuals_vec);
     }
 
-    delete coo_mat;
     delete crs_mat;
+    delete coo_mat;
 
     return 0;
 }

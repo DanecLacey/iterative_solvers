@@ -196,7 +196,7 @@ void spmv_crs(
         for(int nz_idx = mtx->row_ptr[row_idx]; nz_idx < mtx->row_ptr[row_idx+1]; ++nz_idx){
             (*y)[row_idx] += mtx->val[nz_idx] * (*x)[mtx->col[nz_idx]];
 #ifdef DEBUG_MODE
-            std::cout << mtx->vals[nz_idx] << " * " << (*x)[mtx->col[nz_idx]] << " = " << (*y)[row_idx] << " at idx: " << row_idx << std::endl; 
+            // std::cout << mtx->val[nz_idx] << " * " << (*x)[mtx->col[nz_idx]] << " = " << (*y)[row_idx] << " at idx: " << row_idx << std::endl; 
 #endif
         }
     }

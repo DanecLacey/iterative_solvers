@@ -12,6 +12,8 @@ struct Flags
     bool print_residuals;
     bool convergence_flag;
     bool export_errors;
+    bool precondition;
+    bool compare_direct;
 };
 
 // TODO: Make user-enetered option available
@@ -23,10 +25,18 @@ struct LoopParams
     int max_iters;
     double stopping_criteria;
     double tol;
+    double init_b;
+    double init_x;
 };
 
 struct CRSMtxData
 {
+    CRSMtxData(int _n_rows, int _n_cols, int _nnz, int *_row_ptr, int *_col, double *_val) 
+        : n_rows(_n_rows), n_cols(_n_cols), nnz(_nnz), row_ptr(_row_ptr), col(_col), val(_val) {};
+
+    CRSMtxData() 
+        : n_rows(0), n_cols(0), nnz(0), row_ptr(nullptr), col(nullptr), val(nullptr) {};
+
     int n_rows{};
     int n_cols{};
     int nnz{};

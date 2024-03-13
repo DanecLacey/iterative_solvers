@@ -2,6 +2,7 @@ COMPILER=gcc
 
 DEBUG_MODE = 0
 USE_LIKWID = 0
+USE_EIGEN = 0
 
 # TODO
 # USE_METIS = 1
@@ -50,17 +51,34 @@ ifeq ($(USE_LIKWID),1)
   CXXFLAGS  += -DUSE_LIKWID -DLIKWID_PERFMON $(LIKWID_INC) $(LIKWID_LIB) -llikwid
 endif
 
-main: main.o funcs.o kernels.o mmio.o
-	$(CXX) $(CXXFLAGS) -o main main.o funcs.o kernels.o mmio.o
+# Header-only library
+ifeq ($(USE_EIGEN),1)
+  # !!! include your own file paths !!! (I'm just loading module, which comes with file paths)
+  # EIGEN_INC =
+  ifeq ($(EIGEN_ROOT),)
+    $(error USE_EIGEN selected, but no include path given in EIGEN_ROOT)
+  endif
+  CXXFLAGS  += -DUSE_EIGEN -I$(EIGEN_ROOT)/include/eigen3/
+endif
+
+iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
+	$(CXX) $(CXXFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers
 	-rm *.o
 	
 # main only depends on funcs, mmio, and structs header, not kernels
-main.o: main.cpp funcs.hpp
+main.o: main.cpp utility_funcs.hpp io_funcs.hpp
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c main.cpp -o main.o
 	
+solvers.o: solvers.cpp solvers.hpp
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c solvers.cpp -o solvers.o
+
 # funcs depends on kernels
-funcs.o: funcs.cpp funcs.hpp kernels.o mmio.o
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c funcs.cpp -o funcs.o
+utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o 
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c utility_funcs.cpp -o utility_funcs.o
+
+# funcs depends on kernels
+io_funcs.o: io_funcs.cpp io_funcs.hpp utility_funcs.hpp mmio.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c io_funcs.cpp -o io_funcs.o
 
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
