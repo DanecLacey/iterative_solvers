@@ -22,6 +22,12 @@ void sum_vectors(
     const std::vector<double> *vec2
 );
 
+void subtract_vectors(
+    std::vector<double> *result_vec,
+    const std::vector<double> *vec1,
+    const std::vector<double> *vec2
+);
+
 void sum_matrices(
     COOMtxData *sum_mtx,
     const COOMtxData *mtx1,

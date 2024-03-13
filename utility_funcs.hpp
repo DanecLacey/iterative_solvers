@@ -19,7 +19,9 @@ void generate_vector(
 double calc_residual(
     CRSMtxData *crs_mat,
     std::vector<double> *x_new,
-    std::vector<double> *b
+    std::vector<double> *b,
+    std::vector<double> *r,
+    std::vector<double> *A_x_tmp
 );
 
 void start_time(

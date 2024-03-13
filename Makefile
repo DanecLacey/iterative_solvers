@@ -3,6 +3,7 @@ COMPILER=gcc
 DEBUG_MODE = 0
 USE_LIKWID = 0
 USE_EIGEN = 0
+USE_GPROF = 1
 
 # TODO
 # USE_METIS = 1
@@ -61,32 +62,36 @@ ifeq ($(USE_EIGEN),1)
   CXXFLAGS  += -DUSE_EIGEN -I$(EIGEN_ROOT)/include/eigen3/
 endif
 
+ifeq ($(USE_GPROF),1)
+  PROFFLAGS  += -pg 
+endif
+
 iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
-	$(CXX) $(CXXFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers
 	-rm *.o
 	
 # main only depends on funcs, mmio, and structs header, not kernels
 main.o: main.cpp utility_funcs.hpp io_funcs.hpp
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c main.cpp -o main.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o
 	
 solvers.o: solvers.cpp solvers.hpp
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c solvers.cpp -o solvers.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -fno-inline -c solvers.cpp -o solvers.o
 
 # funcs depends on kernels
 utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o 
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c utility_funcs.cpp -o utility_funcs.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o
 
 # funcs depends on kernels
 io_funcs.o: io_funcs.cpp io_funcs.hpp utility_funcs.hpp mmio.o
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c io_funcs.cpp -o io_funcs.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c io_funcs.cpp -o io_funcs.o
 
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c kernels.cpp -o kernels.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -fno-inline -c kernels.cpp -o kernels.o
 
 # only depends on "mmio" src and header
 mmio.o: mmio.cpp mmio.h
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) -c mmio.cpp -o mmio.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c mmio.cpp -o mmio.o
 
 #################### Test Suite ####################
 TEST_INC_DIR = /home/danel/iterative_solvers/splitting_type_solvers

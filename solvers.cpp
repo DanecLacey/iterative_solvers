@@ -31,15 +31,17 @@ void jacobi_solve(
     std::vector<double> *x_new,
     std::vector<double> *x_star,
     std::vector<double> *b,
+    std::vector<double> *r,
+    std::vector<double> *A_x_tmp,
     CRSMtxData *crs_mat,
-    std::vector<double> *residuals_vec,
+    std::vector<double> *normed_residuals,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 )
 {
     int ncols = crs_mat->n_cols;
-    double residual;
+    double residual_norm;
 
     if(flags->print_iters){
         iter_output(x_old, loop_params->iter_count);
@@ -67,8 +69,9 @@ void jacobi_solve(
         if (loop_params->iter_count % loop_params->residual_check_len == 0){
             
             // Record residual every "residual_check_len" iterations
-            residual = calc_residual(crs_mat, x_new, b);
-            (*residuals_vec)[loop_params->residual_count] = residual;
+            calc_residual(crs_mat, x_new, b, r, A_x_tmp);
+            residual_norm = infty_vec_norm(r);
+            (*normed_residuals)[loop_params->residual_count] = residual_norm;
             ++loop_params->residual_count;
 
             if(flags->print_iters){
@@ -83,7 +86,7 @@ void jacobi_solve(
         }
         std::cout << "]" << std::endl;
   
-        std::cout << "residual: " << residual << std::endl;
+        std::cout << "residual norm: " << infty_vec_norm(r) << std::endl;
         std::cout << "stopping_criteria: " << loop_params->stopping_criteria << std::endl; 
 #endif  
     
@@ -91,14 +94,15 @@ void jacobi_solve(
 
         ++loop_params->iter_count;
 
-    } while(residual > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
+    } while(residual_norm > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
 
-    flags->convergence_flag = (residual <= loop_params->stopping_criteria) ? true : false;
+    flags->convergence_flag = (residual_norm <= loop_params->stopping_criteria) ? true : false;
 
     std::swap(*x_old, *x_star);
 
     // Record final residual with approximated solution vector x
-    (*residuals_vec)[loop_params->residual_count] = calc_residual(crs_mat, x_star, b);
+    calc_residual(crs_mat, x_star, b, r, A_x_tmp);
+    (*normed_residuals)[loop_params->residual_count] = infty_vec_norm(r);
 
     // End timer
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);
@@ -130,6 +134,8 @@ void gs_solve(
     std::vector<double> *x,
     std::vector<double> *x_star,
     std::vector<double> *b,
+    std::vector<double> *r,
+    std::vector<double> *A_x_tmp,
     CRSMtxData *crs_mat,
     std::vector<double> *residuals_vec,
     double *calc_time_elapsed,
@@ -137,7 +143,7 @@ void gs_solve(
     LoopParams *loop_params
 ){
     int ncols = crs_mat->n_cols;
-    double residual;
+    double residual_norm;
 
     if(flags->print_iters){
         iter_output(x, loop_params->iter_count);
@@ -165,8 +171,9 @@ void gs_solve(
         if (loop_params->iter_count % loop_params->residual_check_len == 0){
             
             // Record residual every "residual_check_len" iterations
-            residual = calc_residual(crs_mat, x, b);
-            (*residuals_vec)[loop_params->residual_count] = residual;
+            calc_residual(crs_mat, x, b, r, A_x_tmp);
+            residual_norm = infty_vec_norm(r);
+            (*residuals_vec)[loop_params->residual_count] = residual_norm;
             ++loop_params->residual_count;
 
             if(flags->print_iters){
@@ -181,20 +188,21 @@ void gs_solve(
         }
         std::cout << "]" << std::endl;
   
-        std::cout << "residual: " << residual << std::endl;
+        std::cout << "residual norm: " << infty_vec_norm(r) << std::endl;
         std::cout << "stopping_criteria: " << loop_params->stopping_criteria << std::endl; 
 #endif  
     
         ++loop_params->iter_count;
 
-    } while(residual > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
+    } while(residual_norm > loop_params->stopping_criteria && loop_params->iter_count < loop_params->max_iters);
 
-    flags->convergence_flag = (residual <= loop_params->stopping_criteria) ? true : false;
+    flags->convergence_flag = (residual_norm <= loop_params->stopping_criteria) ? true : false;
 
     std::swap(*x, *x_star);
 
     // Record final residual with approximated solution vector x
-    (*residuals_vec)[loop_params->residual_count] = calc_residual(crs_mat, x_star, b);
+    calc_residual(crs_mat, x, b, r, A_x_tmp);
+    (*residuals_vec)[loop_params->residual_count] = infty_vec_norm(r);
 
     // End timer
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);

@@ -20,20 +20,20 @@ void solve(
     std::string *solver_type,
     std::vector<double> *x_star,
     std::vector<double> *b,
-    std::vector<double> *residuals_vec,
+    std::vector<double> *normed_residuals,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 ){
     int n_cols = coo_mat->n_cols;
 
-    // Declare common structs
-    std::vector<double> x_new(n_cols);
-    std::vector<double> x_old(n_cols);
-
-    // Pre-allocate vector sizes
-    x_star->resize(n_cols);
-    b->resize(n_cols);
+    // Declare common structs and allocate sizes
+    std::vector<double> x_new(n_cols, 0);
+    std::vector<double> x_old(n_cols, 0);
+    std::vector<double> r(n_cols, 0);
+    std::vector<double> A_x_tmp(n_cols, 0); // temporary buffer for residual computations
+    x_star->resize(n_cols, 0);
+    b->resize(n_cols, 0);
 
     // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
@@ -44,13 +44,14 @@ void solve(
     generate_vector(&x_old, n_cols, false, loop_params->init_x);
 
     // Precalculate stopping criteria
-    loop_params->stopping_criteria = loop_params->tol * calc_residual(crs_mat, &x_old, b);
+    calc_residual(crs_mat, &x_old, b, &r, &A_x_tmp);
+    loop_params->stopping_criteria = loop_params->tol * infty_vec_norm(&r); 
 
     if ((*solver_type) == "jacobi"){
-        jacobi_solve(&x_old, &x_new, x_star, b, crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
+        jacobi_solve(&x_old, &x_new, x_star, b, &r, &A_x_tmp, crs_mat, normed_residuals, calc_time_elapsed, flags, loop_params);
     }
     else if ((*solver_type) == "gauss-seidel"){
-        gs_solve(&x_old, x_star, b, crs_mat, residuals_vec, calc_time_elapsed, flags, loop_params);
+        gs_solve(&x_old, x_star, b, &r, &A_x_tmp, crs_mat, normed_residuals, calc_time_elapsed, flags, loop_params);
     }
     else{
         printf("ERROR: solve: This solver method is not implemented yet.\n");
@@ -105,7 +106,7 @@ int main(int argc, char *argv[]){
     CRSMtxData *crs_mat = new CRSMtxData;
 
     std::vector<double> x_star, b;
-    std::vector<double> residuals_vec(loop_params.max_iters / loop_params.residual_check_len + 1);
+    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1);
     double total_time_elapsed;
     double calc_time_elapsed;
 
@@ -122,19 +123,19 @@ int main(int argc, char *argv[]){
     // TODO, more preprocessing
 
     // Main solver routine
-    solve(coo_mat, crs_mat, &solver_type, &x_star, &b, &residuals_vec, &calc_time_elapsed, &flags, &loop_params);
+    solve(coo_mat, crs_mat, &solver_type, &x_star, &b, &normed_residuals, &calc_time_elapsed, &flags, &loop_params);
 
     total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
     if(flags.compare_direct){
-        compare_with_direct(crs_mat, matrix_file_name, loop_params, &x_star, residuals_vec[loop_params.residual_count]);
+        compare_with_direct(crs_mat, matrix_file_name, loop_params, &x_star, normed_residuals[loop_params.residual_count]);
     }
 
     if(flags.print_summary){
-        summary_output(coo_mat, &x_star, &b, &residuals_vec, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
+        summary_output(coo_mat, &x_star, &b, &normed_residuals, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
     }
     if(flags.export_errors){
-        write_residuals_to_file(&residuals_vec);
+        write_residuals_to_file(&normed_residuals);
     }
 
     delete crs_mat;

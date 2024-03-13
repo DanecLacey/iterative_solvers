@@ -44,10 +44,11 @@ void vec_spmv_coo(
 }
 
 void sum_vectors(
-    std::vector<double> *sum_vec,
+    std::vector<double> *result_vec,
     const std::vector<double> *vec1,
     const std::vector<double> *vec2
 ){
+#ifdef DEBUG_MODE
     if(vec1->size() != vec2->size()){
         printf("ERROR: sum_vectors: mismatch in vector sizes.\n");
         exit(1);
@@ -56,10 +57,33 @@ void sum_vectors(
         printf("ERROR: sum_vectors: zero size vectors.\n");
         exit(1);
     }
+#endif
 
-    // parallel for candidate
+    // #pragma omp parallel for
     for (int i=0; i<vec1->size(); i++){
-        (*sum_vec)[i] = (*vec1)[i] + (*vec2)[i];
+        (*result_vec)[i] = (*vec1)[i] + (*vec2)[i];
+    }
+}
+
+void subtract_vectors(
+    std::vector<double> *result_vec,
+    const std::vector<double> *vec1,
+    const std::vector<double> *vec2
+){
+#ifdef DEBUG_MODE
+    if(vec1->size() != vec2->size()){
+        printf("ERROR: sum_vectors: mismatch in vector sizes.\n");
+        exit(1);
+    }
+    if(vec1->size() == 0){
+        printf("ERROR: sum_vectors: zero size vectors.\n");
+        exit(1);
+    }
+#endif
+
+    // #pragma omp parallel for
+    for (int i=0; i<vec1->size(); i++){
+        (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
     }
 }
 

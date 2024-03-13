@@ -80,31 +80,21 @@ double infty_mat_norm(
 
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
-double calc_residual(
+void calc_residual(
     CRSMtxData *crs_mat,
     std::vector<double> *x,
-    std::vector<double> *b
+    std::vector<double> *b,
+    std::vector<double> *r,
+    std::vector<double> *A_x_tmp
 ){
     int n_cols = crs_mat->n_cols;
 
-    std::vector<double> A_x(n_cols); 
+    // TODO: better way to do this?
+    std::fill(A_x_tmp->begin(), A_x_tmp->end(), 0);
 
-    spmv_crs(&A_x, crs_mat, x);
+    spmv_crs(A_x_tmp, crs_mat, x);
 
-    std::vector<double> A_x_minus_b(n_cols);
-    std::vector<double> neg_b(n_cols);
-
-    neg_b = *b;
-    std::transform( // negate
-        neg_b.cbegin(), 
-        neg_b.cend(), 
-        neg_b.begin(), 
-        std::negate<double>()
-    );
-
-    sum_vectors(&A_x_minus_b, &A_x, &neg_b);
-
-    return infty_vec_norm(&A_x_minus_b);
+    subtract_vectors(r, b, A_x_tmp);
 }
 
 void start_time(
