@@ -46,4 +46,17 @@ void write_comparison_to_file(
     std::vector<double> *x_direct,
     double direct_final_residual
 );
+
+void postprocessing(
+    CRSMtxData *crs_mat,
+    std::string matrix_file_name,
+    LoopParams loop_params,
+    std::vector<double> *x_star,
+    std::vector<double> *b,
+    std::vector<double> *normed_residuals,
+    std::string solver_type,
+    Flags flags,
+    double total_time_elapsed,
+    double calc_time_elapsed
+);
 #endif /*IO_FUNCS_H*/

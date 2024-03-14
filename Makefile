@@ -3,7 +3,7 @@ COMPILER=gcc
 DEBUG_MODE = 0
 USE_LIKWID = 0
 USE_EIGEN = 0
-USE_GPROF = 1
+USE_GPROF = 0
 
 # TODO
 # USE_METIS = 1
@@ -63,7 +63,7 @@ ifeq ($(USE_EIGEN),1)
 endif
 
 ifeq ($(USE_GPROF),1)
-  PROFFLAGS  += -pg 
+  PROFFLAGS  += -pg -fno-inline 
 endif
 
 iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
@@ -75,7 +75,7 @@ main.o: main.cpp utility_funcs.hpp io_funcs.hpp
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o
 	
 solvers.o: solvers.cpp solvers.hpp
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -fno-inline -c solvers.cpp -o solvers.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c solvers.cpp -o solvers.o
 
 # funcs depends on kernels
 utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o 
@@ -87,7 +87,7 @@ io_funcs.o: io_funcs.cpp io_funcs.hpp utility_funcs.hpp mmio.o
 
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -fno-inline -c kernels.cpp -o kernels.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c kernels.cpp -o kernels.o
 
 # only depends on "mmio" src and header
 mmio.o: mmio.cpp mmio.h

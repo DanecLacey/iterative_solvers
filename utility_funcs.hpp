@@ -17,9 +17,9 @@ void generate_vector(
 );
 
 double calc_residual(
-    CRSMtxData *crs_mat,
-    std::vector<double> *x_new,
-    std::vector<double> *b,
+    const CRSMtxData *crs_mat,
+    const std::vector<double> *x_new,
+    const std::vector<double> *b,
     std::vector<double> *r,
     std::vector<double> *A_x_tmp
 );
@@ -38,7 +38,7 @@ double infty_vec_norm(
 );
 
 double infty_mat_norm(
-    CRSMtxData *crs_mat
+    const CRSMtxData *crs_mat
 );
 
 void gen_neg_inv(
@@ -50,6 +50,11 @@ void gen_neg_inv(
 void recip_elems(    
     std::vector<double> *recip_vec,
     std::vector<double> *vec
+);
+
+void extract_diag(
+    const CRSMtxData *crs_mat,
+    std::vector<double> *diag
 );
 
 void compare_with_direct(

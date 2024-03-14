@@ -59,7 +59,7 @@ double infty_vec_norm(
 }
 
 double infty_mat_norm(
-    CRSMtxData *crs_mat
+    const CRSMtxData *crs_mat
 ){
     // Accumulate with sum all the elements in each row
     std::vector<double> row_sums(crs_mat->n_rows, 0.0);
@@ -81,9 +81,9 @@ double infty_mat_norm(
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
 void calc_residual(
-    CRSMtxData *crs_mat,
-    std::vector<double> *x,
-    std::vector<double> *b,
+    const CRSMtxData *crs_mat,
+    const std::vector<double> *x,
+    const std::vector<double> *b,
     std::vector<double> *r,
     std::vector<double> *A_x_tmp
 ){
@@ -148,6 +148,21 @@ void gen_neg_inv(
         neg_inv_coo_vec->begin(), 
         std::negate<double>()
     );
+}
+
+void extract_diag(
+    const CRSMtxData *crs_mat,
+    std::vector<double> *diag
+){
+    #pragma omp parallel for schedule (static)
+    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
+        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+            if(row_idx == crs_mat->col[nz_idx]){
+                (*diag)[row_idx] = crs_mat->val[nz_idx];
+                break;
+            }
+        }
+    }
 }
 
 void compare_with_direct(

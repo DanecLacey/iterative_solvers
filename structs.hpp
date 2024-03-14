@@ -11,7 +11,6 @@ struct Flags
     bool print_summary;
     bool print_residuals;
     bool convergence_flag;
-    bool export_errors;
     bool precondition;
     bool compare_direct;
 };

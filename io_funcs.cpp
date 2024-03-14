@@ -221,7 +221,6 @@ void residuals_output(
 }
 
 void summary_output(
-    COOMtxData *coo_mat,
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *residuals_vec,
@@ -286,4 +285,30 @@ void write_comparison_to_file(
         out_file << "idx: " << i << ", " << (*x_star)[i] << " - " <<  (*x_direct)[i] << " = " << (*x_star)[i] - (*x_direct)[i] << "\n";
     }
     out_file.close();
+}
+
+void postprocessing(
+    CRSMtxData *crs_mat,
+    std::string matrix_file_name,
+    LoopParams loop_params,
+    std::vector<double> *x_star,
+    std::vector<double> *b,
+    std::vector<double> *normed_residuals,
+    std::string solver_type,
+    Flags flags,
+    double total_time_elapsed,
+    double calc_time_elapsed
+){
+    if(flags.compare_direct){
+        compare_with_direct(crs_mat, matrix_file_name, loop_params, x_star, (*normed_residuals)[loop_params.residual_count]);
+    }
+
+    if(flags.print_summary){
+        summary_output(x_star, b, normed_residuals, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
+    }
+    
+    //sufficent to just print to stdout for now
+    // if(flags.print_residuals){
+    //     write_residuals_to_file(normed_residuals);
+    // }
 }

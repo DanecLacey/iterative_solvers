@@ -15,9 +15,8 @@
 #include "mmio.h"
 
 void solve(
-    COOMtxData *coo_mat,
     CRSMtxData *crs_mat,
-    std::string *solver_type,
+    std::string solver_type,
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *normed_residuals,
@@ -25,12 +24,13 @@ void solve(
     Flags *flags,
     LoopParams *loop_params
 ){
-    int n_cols = coo_mat->n_cols;
+    int n_cols = crs_mat->n_cols;
 
     // Declare common structs and allocate sizes
     std::vector<double> x_new(n_cols, 0);
     std::vector<double> x_old(n_cols, 0);
     std::vector<double> r(n_cols, 0);
+    std::vector<double> diag(n_cols, 0);
     std::vector<double> A_x_tmp(n_cols, 0); // temporary buffer for residual computations
     x_star->resize(n_cols, 0);
     b->resize(n_cols, 0);
@@ -43,15 +43,18 @@ void solve(
     // Make initial x vector
     generate_vector(&x_old, n_cols, false, loop_params->init_x);
 
+    // Extract diagonal elements for easier library interop with kernels
+    extract_diag(crs_mat, &diag);
+
     // Precalculate stopping criteria
     calc_residual(crs_mat, &x_old, b, &r, &A_x_tmp);
     loop_params->stopping_criteria = loop_params->tol * infty_vec_norm(&r); 
 
-    if ((*solver_type) == "jacobi"){
-        jacobi_solve(&x_old, &x_new, x_star, b, &r, &A_x_tmp, crs_mat, normed_residuals, calc_time_elapsed, flags, loop_params);
+    if (solver_type == "jacobi"){
+        jacobi_solve(&x_old, &x_new, x_star, b, &r, &A_x_tmp, crs_mat, &diag, normed_residuals, calc_time_elapsed, flags, loop_params);
     }
-    else if ((*solver_type) == "gauss-seidel"){
-        gs_solve(&x_old, x_star, b, &r, &A_x_tmp, crs_mat, normed_residuals, calc_time_elapsed, flags, loop_params);
+    else if (solver_type == "gauss-seidel"){
+        gs_solve(&x_old, x_star, b, &r, &A_x_tmp, crs_mat, &diag, normed_residuals, calc_time_elapsed, flags, loop_params);
     }
     else{
         printf("ERROR: solve: This solver method is not implemented yet.\n");
@@ -82,12 +85,11 @@ int main(int argc, char *argv[]){
     std::string matrix_file_name, solver_type;
     struct timeval total_time_start, total_time_end;
     Flags flags{
-        false, // print_iters
+        false, // print_iters. WARNING: costly
         true, // print_summary
         true, // print_residuals
         true, // convergence_flag. TODO: really shouldn't be here
-        true, // export simple error per iteration in CURRDIR/errors.txt
-        true, // apply left Jacobi preconditioner to A and b
+        false, // apply preconditioner TODO: not implemented
         false // Compare to SparseLU direct solver
     };
 
@@ -95,9 +97,9 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         50, // calculate residual every n iterations
-        1000, // maximum iteration count
+        10000, // maximum iteration count
         0.0, // init stopping criteria
-        1e-15, // tolerance to stop iterations
+        1e-14, // tolerance to stop iterations
         1.1, // init value for b
         0.0 // init value for x
     };
@@ -115,28 +117,34 @@ int main(int argc, char *argv[]){
 
     // Read COO format mtx file
     read_mtx(matrix_file_name, coo_mat);
-         
-    coo_mat->convert_to_crs(crs_mat);
 
     // Collect preprocessing time
     start_time(&total_time_start);
-    // TODO, more preprocessing
 
-    // Main solver routine
-    solve(coo_mat, crs_mat, &solver_type, &x_star, &b, &normed_residuals, &calc_time_elapsed, &flags, &loop_params);
+    // TODO: MPI preprocessing will go here
+         
+    coo_mat->convert_to_crs(crs_mat);
+
+    // TODO: process-local preprocessing
+    // preprocessing();
+
+    ///////// Main solver routine /////////
+    solve(crs_mat, solver_type, &x_star, &b, &normed_residuals, &calc_time_elapsed, &flags, &loop_params);
 
     total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
-    if(flags.compare_direct){
-        compare_with_direct(crs_mat, matrix_file_name, loop_params, &x_star, normed_residuals[loop_params.residual_count]);
-    }
-
-    if(flags.print_summary){
-        summary_output(coo_mat, &x_star, &b, &normed_residuals, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
-    }
-    if(flags.export_errors){
-        write_residuals_to_file(&normed_residuals);
-    }
+    postprocessing(
+        crs_mat, 
+        matrix_file_name, 
+        loop_params, 
+        &x_star, 
+        &b,
+        &normed_residuals,
+        solver_type, 
+        flags, 
+        total_time_elapsed, 
+        calc_time_elapsed
+    );
 
     delete crs_mat;
     delete coo_mat;

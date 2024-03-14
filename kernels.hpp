@@ -38,6 +38,12 @@ void spmv_crs(
     std::vector<double> *y,
     const CRSMtxData *crs_mat,
     const std::vector<double> *x
-    );
+);
+
+// void neg_spmv_crs(
+//     std::vector<double> *y,
+//     const CRSMtxData *crs_mat,
+//     const std::vector<double> *x
+// );
 
 #endif /*KERNELS_H*/
