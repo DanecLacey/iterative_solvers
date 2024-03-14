@@ -229,23 +229,3 @@ void spmv_crs(
     }
 
 }
-
-// void neg_spmv_crs(
-//     std::vector<double> *y,
-//     const CRSMtxData *crs_mat,
-//     const std::vector<double> *x
-//     )
-// {
-//     #pragma omp parallel for schedule (static)
-//     double tmp = 0.0;
-//     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-//         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-//             tmp -= crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]];
-// #ifdef DEBUG_MODE
-//             // std::cout << mtx->val[nz_idx] << " * " << (*x)[mtx->col[nz_idx]] << " = " << (*y)[row_idx] << " at idx: " << row_idx << std::endl; 
-// #endif
-//         }
-//         (*y)[row_idx] = tmp;
-//     }
-
-// }
