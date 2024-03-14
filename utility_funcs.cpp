@@ -87,11 +87,6 @@ void calc_residual(
     std::vector<double> *r,
     std::vector<double> *A_x_tmp
 ){
-    int n_cols = crs_mat->n_cols;
-
-    // TODO: better way to do this?
-    std::fill(A_x_tmp->begin(), A_x_tmp->end(), 0);
-
     spmv_crs(A_x_tmp, crs_mat, x);
 
     subtract_vectors(r, b, A_x_tmp);
