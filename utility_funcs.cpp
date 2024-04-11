@@ -87,9 +87,12 @@ void calc_residual(
     std::vector<double> *r,
     std::vector<double> *A_x_tmp
 ){
-    spmv_crs(A_x_tmp, crs_mat, x);
+    #pragma omp parallel
+    {
+        spmv_crs(A_x_tmp, crs_mat, x);
 
-    subtract_vectors(r, b, A_x_tmp);
+        subtract_vectors(r, b, A_x_tmp);
+    }
 }
 
 void start_time(

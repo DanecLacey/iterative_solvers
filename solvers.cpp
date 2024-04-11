@@ -58,10 +58,13 @@ void jacobi_iteration_sep(
     std::vector<double> *x_old,
     std::vector<double> *x_new // treat like y
 ){
-    spmv_crs(x_new, crs_mat, x_old);
+    #pragma omp parallel
+    {
+        spmv_crs(x_new, crs_mat, x_old);
 
-    // account for diagonal element in sum, RHS, and division 
-    jacobi_normalize_x(x_new, x_old, D, b, crs_mat->n_rows);
+        // account for diagonal element in sum, RHS, and division 
+        jacobi_normalize_x(x_new, x_old, D, b, crs_mat->n_rows);
+    }
 }
 
 void jacobi_solve(
@@ -183,30 +186,36 @@ void gs_iteration_sep(
     std::vector<double> *b,
     std::vector<double> *x
 ){
-    // spmv on strictly upper triangular portion of A to compute tmp <- Ux_{k-1}
-    // trspmv_crs(tmp, crs_U, x); // <- TODO: Could you benefit from a triangular spmv?
-    spmv_crs(tmp, crs_U, x);
-    // printf("Ux = [");
-    // for(int i = 0; i < crs_mat->n_rows; ++i){
-    //     std::cout << (*tmp)[i] << "," <<  std::endl;
-    // }
-    // printf("]\n");
+    #pragma omp parallel
+    {
+        // spmv on strictly upper triangular portion of A to compute tmp <- Ux_{k-1}
+        // trspmv_crs(tmp, crs_U, x); // <- TODO: Could you benefit from a triangular spmv?
+        spmv_crs(tmp, crs_U, x);
+        // printf("Ux = [");
+        // for(int i = 0; i < crs_mat->n_rows; ++i){
+        //     std::cout << (*tmp)[i] << "," <<  std::endl;
+        // }
+        // printf("]\n");
 
-    // subtract b to compute tmp <- b-Ux_{k-1}
-    subtract_vectors(tmp, b, tmp);
-    // printf("b-Ux = [");
-    // for(int i = 0; i < crs_mat->n_rows; ++i){
-    //     std::cout << (*tmp)[i] << "," <<  std::endl;
-    // }
-    // printf("]\n");
+        // subtract b to compute tmp <- b-Ux_{k-1}
+        subtract_vectors(tmp, b, tmp);
+        // printf("b-Ux = [");
+        // for(int i = 0; i < crs_mat->n_rows; ++i){
+        //     std::cout << (*tmp)[i] << "," <<  std::endl;
+        // }
+        // printf("]\n");
 
-    // performs the lower triangular solve (L+D)x_k=b-Ux_{k-1}
-    spltsv_crs(crs_L, x, D, tmp);
-    // printf("(D+L)^{-1}(b-Ux) = [");
-    // for(int i = 0; i < crs_mat->n_rows; ++i){
-    //     std::cout << (*x)[i] << "," <<  std::endl;
-    // }
-    // printf("]\n");
+        // performs the lower triangular solve (L+D)x_k=b-Ux_{k-1}
+        #pragma omp master
+        {
+            spltsv_crs(crs_L, x, D, tmp);
+        }
+        // printf("(D+L)^{-1}(b-Ux) = [");
+        // for(int i = 0; i < crs_mat->n_rows; ++i){
+        //     std::cout << (*x)[i] << "," <<  std::endl;
+        // }
+        // printf("]\n");
+    }
 }
 
 void gs_solve(
@@ -249,8 +258,6 @@ void gs_solve(
     do{
         // gs_iteration_ref(crs_mat, crs_L, crs_U, tmp, D, b, x);
         gs_iteration_sep(crs_mat, crs_L, crs_U, tmp, D, b, x);
-        if (loop_params->iter_count == 2)
-            exit(0);
         
         if (loop_params->iter_count % loop_params->residual_check_len == 0){
             

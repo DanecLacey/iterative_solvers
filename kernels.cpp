@@ -80,8 +80,8 @@ void subtract_vectors(
         exit(1);
     }
 #endif
-
-    #pragma omp parallel for
+    // Orphaned directive: Assumed already called within a parallel region
+    #pragma omp for
     for (int i=0; i<vec1->size(); i++){
         (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
     }
@@ -216,7 +216,8 @@ void spmv_crs(
 {
     double tmp;
 
-    #pragma omp parallel for schedule (static)
+    // Orphaned directive: Assumed already called within a parallel region
+    #pragma omp for schedule (static)
     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
         tmp = 0.0;
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
@@ -237,7 +238,9 @@ void jacobi_normalize_x(
     int n_rows
 ){
     double adjusted_x;
-    #pragma omp parallel for schedule (static)
+
+    // Orphaned directive: Assumed already called within a parallel region
+    #pragma omp for schedule (static)
     for(int row_idx = 0; row_idx < n_rows; ++row_idx){
         adjusted_x = (*x_new)[row_idx] - (*D)[row_idx] * (*x_old)[row_idx];
         (*x_new)[row_idx] = ((*b)[row_idx] - adjusted_x)/ (*D)[row_idx];
