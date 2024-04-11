@@ -55,6 +55,31 @@ struct CRSMtxData
     // void doRCMPermute();
 
     void permute(int* perm, int* invPerm, bool RACEalloc=false);
+
+    void print(void)
+    {
+        std::cout << "n_rows = " << n_rows << std::endl;
+        std::cout << "n_cols = " << n_cols << std::endl;
+        std::cout << "nnz = " << nnz << std::endl;
+
+        std::cout << "row_ptr = [";
+        for(int i = 0; i < n_rows+1; ++i){
+            std::cout << row_ptr[i] << ", ";
+        }
+        std::cout << "]" << std::endl;
+
+        std::cout << "col = [";
+        for(int i = 0; i < nnz; ++i){
+            std::cout << col[i] << ", ";
+        }
+        std::cout << "]" << std::endl;
+
+        std::cout << "valu = [";
+        for(int i = 0; i < nnz; ++i){
+            std::cout << val[i] << ", ";
+        }
+        std::cout << "]" << std::endl;
+    }
 };
 
 // TODO: Make class with member funcitons

@@ -59,7 +59,7 @@ void sum_vectors(
     }
 #endif
 
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i=0; i<vec1->size(); i++){
         (*result_vec)[i] = (*vec1)[i] + (*vec2)[i];
     }
@@ -81,7 +81,7 @@ void subtract_vectors(
     }
 #endif
 
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i=0; i<vec1->size(); i++){
         (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
     }
@@ -227,5 +227,40 @@ void spmv_crs(
         }
         (*y)[row_idx] = tmp;
     }
+}
 
+void jacobi_normalize_x(
+    std::vector<double> *x_new,
+    const std::vector<double> *x_old,
+    const std::vector<double> *D,
+    const std::vector<double> *b,
+    int n_rows
+){
+    double adjusted_x;
+    #pragma omp parallel for schedule (static)
+    for(int row_idx = 0; row_idx < n_rows; ++row_idx){
+        adjusted_x = (*x_new)[row_idx] - (*D)[row_idx] * (*x_old)[row_idx];
+        (*x_new)[row_idx] = ((*b)[row_idx] - adjusted_x)/ (*D)[row_idx];
+    }
+}
+
+void spltsv_crs(
+    const CRSMtxData *crs_L,
+    std::vector<double> *x,
+    const std::vector<double> *D,
+    const std::vector<double> *b_Ux
+)
+{
+    double sum;
+
+    for(int row_idx = 0; row_idx < crs_L->n_rows; ++row_idx){
+        sum = 0.0;
+        for(int nz_idx = crs_L->row_ptr[row_idx]; nz_idx < crs_L->row_ptr[row_idx+1]; ++nz_idx){
+            sum += crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]];
+#ifdef DEBUG_MODE
+            std::cout << crs_L->val[nz_idx] << " * " << (*x)[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+#endif
+        }
+        (*x)[row_idx] = ((*b_Ux)[row_idx] - sum)/(*D)[row_idx];
+    }
 }

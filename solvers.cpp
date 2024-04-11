@@ -4,7 +4,7 @@
 
 void jacobi_iteration_ref(
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    std::vector<double> *D,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new
@@ -29,7 +29,7 @@ void jacobi_iteration_ref(
 
 void jacobi_iteration_sep_diag_subtract(
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    std::vector<double> *D,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new
@@ -42,8 +42,8 @@ void jacobi_iteration_sep_diag_subtract(
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
             sum += crs_mat->val[nz_idx] * (*x_old)[crs_mat->col[nz_idx]];
         }
-        sum -= (*diag)[row_idx] * (*x_old)[row_idx]; // account for diagonal element
-        (*x_new)[row_idx] = ((*b)[row_idx] - sum) / (*diag)[row_idx];
+        sum -= (*D)[row_idx] * (*x_old)[row_idx]; // account for diagonal element
+        (*x_new)[row_idx] = ((*b)[row_idx] - sum) / (*D)[row_idx];
     }
 }
 
@@ -51,22 +51,17 @@ void jacobi_iteration_sep_diag_subtract(
     I would think this would allow the easiest library integration, since the SpMV kernel is the same.
     Except here, you would need some way to avoid opening and closing the two parallel regions.
 */
-void jacobi_iteration_sep_spmv(
+void jacobi_iteration_sep(
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    std::vector<double> *D,
     std::vector<double> *b,
     std::vector<double> *x_old,
     std::vector<double> *x_new // treat like y
 ){
-    double diag_adjusted_x;
     spmv_crs(x_new, crs_mat, x_old);
 
-    // account for diagonal element in sum and RHS, and division 
-    #pragma omp parallel for schedule (static)
-    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-        diag_adjusted_x = (*x_new)[row_idx] - (*diag)[row_idx] * (*x_old)[row_idx];
-        (*x_new)[row_idx] = ((*b)[row_idx] - diag_adjusted_x)/ (*diag)[row_idx];
-    }
+    // account for diagonal element in sum, RHS, and division 
+    jacobi_normalize_x(x_new, x_old, D, b, crs_mat->n_rows);
 }
 
 void jacobi_solve(
@@ -75,9 +70,9 @@ void jacobi_solve(
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *r,
-    std::vector<double> *A_x_tmp,
+    std::vector<double> *tmp,
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    std::vector<double> *D,
     std::vector<double> *normed_residuals,
     double *calc_time_elapsed,
     Flags *flags,
@@ -108,14 +103,13 @@ void jacobi_solve(
     // After Jacobi iteration loop, x_new ~ A^{-1}b
     // NOTE: Tasking candidate?
     do{
-        jacobi_iteration_ref(crs_mat, diag, b, x_old, x_new);
-        // jacobi_iteration_sep_diag_subtract(crs_mat, diag, b, x_old, x_new);
-        // jacobi_iteration_sep_spmv(crs_mat, diag, b, x_old, x_new);
+        // jacobi_iteration_ref(crs_mat, D, b, x_old, x_new);
+        jacobi_iteration_sep(crs_mat, D, b, x_old, x_new);
         
         if (loop_params->iter_count % loop_params->residual_check_len == 0){
             
             // Record residual every "residual_check_len" iterations
-            calc_residual(crs_mat, x_new, b, r, A_x_tmp);
+            calc_residual(crs_mat, x_new, b, r, tmp);
             residual_norm = infty_vec_norm(r);
             (*normed_residuals)[loop_params->residual_count] = residual_norm;
             ++loop_params->residual_count;
@@ -147,16 +141,19 @@ void jacobi_solve(
     std::swap(*x_old, *x_star);
 
     // Record final residual with approximated solution vector x
-    calc_residual(crs_mat, x_star, b, r, A_x_tmp);
+    calc_residual(crs_mat, x_star, b, r, tmp);
     (*normed_residuals)[loop_params->residual_count] = infty_vec_norm(r);
 
     // End timer
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);
 }
 
-void gs_iteration(
+void gs_iteration_ref(
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *tmp,
+    std::vector<double> *D,
     std::vector<double> *b,
     std::vector<double> *x
 ){
@@ -177,20 +174,56 @@ void gs_iteration(
     }
 }
 
+void gs_iteration_sep(
+    CRSMtxData *crs_mat,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *tmp,
+    std::vector<double> *D,
+    std::vector<double> *b,
+    std::vector<double> *x
+){
+    // spmv on strictly upper triangular portion of A to compute tmp <- Ux_{k-1}
+    // trspmv_crs(tmp, crs_U, x); // <- TODO: Could you benefit from a triangular spmv?
+    spmv_crs(tmp, crs_U, x);
+    // printf("Ux = [");
+    // for(int i = 0; i < crs_mat->n_rows; ++i){
+    //     std::cout << (*tmp)[i] << "," <<  std::endl;
+    // }
+    // printf("]\n");
+
+    // subtract b to compute tmp <- b-Ux_{k-1}
+    subtract_vectors(tmp, b, tmp);
+    // printf("b-Ux = [");
+    // for(int i = 0; i < crs_mat->n_rows; ++i){
+    //     std::cout << (*tmp)[i] << "," <<  std::endl;
+    // }
+    // printf("]\n");
+
+    // performs the lower triangular solve (L+D)x_k=b-Ux_{k-1}
+    spltsv_crs(crs_L, x, D, tmp);
+    // printf("(D+L)^{-1}(b-Ux) = [");
+    // for(int i = 0; i < crs_mat->n_rows; ++i){
+    //     std::cout << (*x)[i] << "," <<  std::endl;
+    // }
+    // printf("]\n");
+}
+
 void gs_solve(
     std::vector<double> *x,
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *r,
-    std::vector<double> *A_x_tmp,
+    std::vector<double> *tmp,
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
-    std::vector<double> *residuals_vec,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *D,
+    std::vector<double> *normed_residuals,
     double *calc_time_elapsed,
     Flags *flags,
     LoopParams *loop_params
 ){
-    int ncols = crs_mat->n_cols;
     double residual_norm;
 
     if(flags->print_iters){
@@ -200,7 +233,7 @@ void gs_solve(
 
 #ifdef DEBUG_MODE
     std::cout << "x vector:" << std::endl;
-    for(int i = 0; i < ncols; ++i){
+    for(int i = 0; i < crs_mat->n_cols; ++i){
         std::cout << (*x)[i] << std::endl;
     }
 #endif
@@ -214,14 +247,17 @@ void gs_solve(
     // After Jacobi iteration loop, x_new ~ A^{-1}b
     // NOTE: Tasking candidate
     do{
-        gs_iteration(crs_mat, diag, b, x);
+        // gs_iteration_ref(crs_mat, crs_L, crs_U, tmp, D, b, x);
+        gs_iteration_sep(crs_mat, crs_L, crs_U, tmp, D, b, x);
+        if (loop_params->iter_count == 2)
+            exit(0);
         
         if (loop_params->iter_count % loop_params->residual_check_len == 0){
             
             // Record residual every "residual_check_len" iterations
-            calc_residual(crs_mat, x, b, r, A_x_tmp);
+            calc_residual(crs_mat, x, b, r, tmp);
             residual_norm = infty_vec_norm(r);
-            (*residuals_vec)[loop_params->residual_count] = residual_norm;
+            (*normed_residuals)[loop_params->residual_count] = residual_norm;
             ++loop_params->residual_count;
 
             if(flags->print_iters){
@@ -249,8 +285,8 @@ void gs_solve(
     std::swap(*x, *x_star);
 
     // Record final residual with approximated solution vector x
-    calc_residual(crs_mat, x, b, r, A_x_tmp);
-    (*residuals_vec)[loop_params->residual_count] = infty_vec_norm(r);
+    calc_residual(crs_mat, x_star, b, r, tmp);
+    (*normed_residuals)[loop_params->residual_count] = infty_vec_norm(r);
 
     // End timer
     (*calc_time_elapsed) = end_time(&calc_time_start, &calc_time_end);

@@ -40,4 +40,19 @@ void spmv_crs(
     const std::vector<double> *x
 );
 
+void jacobi_normalize_x(
+    std::vector<double> *x_new,
+    const std::vector<double> *x_old,
+    const std::vector<double> *D,
+    const std::vector<double> *b,
+    int n_rows
+);
+
+void spltsv_crs(
+    const CRSMtxData *crs_L,
+    std::vector<double> *x,
+    const std::vector<double> *D,
+    const std::vector<double> *b_Ux
+);
+
 #endif /*KERNELS_H*/

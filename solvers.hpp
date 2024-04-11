@@ -21,7 +21,7 @@ void jacobi_iteration_sep_diag_subtract(
     std::vector<double> *x_new
 );
 
-void jacobi_iteration_sep_spmv(
+void jacobi_iteration_sep(
     CRSMtxData *crs_mat,
     std::vector<double> *diag,
     std::vector<double> *b,
@@ -44,9 +44,22 @@ void jacobi_solve(
     LoopParams *loop_params
 );
 
-void gs_iteration(
+void gs_iteration_ref(
     CRSMtxData *crs_mat,
-    std::vector<double> *diag,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *tmp,
+    std::vector<double> *D,
+    std::vector<double> *b,
+    std::vector<double> *x
+);
+
+void gs_iteration_sep(
+    CRSMtxData *crs_mat,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *tmp,
+    std::vector<double> *D,
     std::vector<double> *b,
     std::vector<double> *x
 );
@@ -56,8 +69,10 @@ void gs_solve(
     std::vector<double> *x_star,
     std::vector<double> *b,
     std::vector<double> *r,
-    std::vector<double> *A_x_tmp,
+    std::vector<double> *tmp,
     CRSMtxData *crs_mat,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
     std::vector<double> *diag,
     std::vector<double> *residuals_vec,
     double *calc_time_elapsed,

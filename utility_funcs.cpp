@@ -21,7 +21,7 @@ void generate_vector(
     std::vector<double> *vec_to_populate,
     int size,
     bool rand_flag,
-    int initial_val
+    double initial_val
 ){
     if(rand_flag){
         double upper_bound = 50000;
@@ -218,4 +218,118 @@ void compare_with_direct(
     printf("ERROR: eigen library not correctly linked, cannot compare approximation with direct solver. Check flags.\n");
     exit(1);
 #endif
+}
+
+void split_L_U(
+    COOMtxData *full_coo_mtx,
+    COOMtxData *L_coo_mtx,
+    COOMtxData *U_coo_mtx
+){
+    bool explitit_zero_warning_flag = false;
+    int L_coo_mtx_count = 0;
+    int U_coo_mtx_count = 0;
+    int D_coo_vec_count = 0;
+
+    // Force same dimensions for consistency
+    U_coo_mtx->n_rows = full_coo_mtx->n_rows;
+    U_coo_mtx->n_cols = full_coo_mtx->n_cols;
+    U_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
+    U_coo_mtx->is_symmetric = false;
+    L_coo_mtx->n_rows = full_coo_mtx->n_rows;
+    L_coo_mtx->n_cols = full_coo_mtx->n_cols;
+    L_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
+    L_coo_mtx->is_symmetric = false;
+
+    for(int nz_idx = 0; nz_idx < full_coo_mtx->nnz; ++nz_idx){
+        // If column and row less than i, this nz is in the L matrix
+        if(full_coo_mtx->J[nz_idx] < full_coo_mtx->I[nz_idx]){
+            // Copy element to lower matrix
+            L_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
+            L_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
+            L_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
+            ++L_coo_mtx->nnz;
+            // std::cout << full_coo_mtx->values[nz_idx] << " sent to lower matrix" << std::endl;
+        }
+        else if(full_coo_mtx->J[nz_idx] > full_coo_mtx->I[nz_idx]){
+            // Copy element to upper matrix
+            U_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
+            U_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
+            U_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
+            ++U_coo_mtx->nnz;
+            // std::cout << full_coo_mtx->values[nz_idx] << " sent to upper matrix" << std::endl;
+        }
+        else if(full_coo_mtx->I[nz_idx] == full_coo_mtx->J[nz_idx]){
+        //     // Copy element to vector representing diagonal matrix
+        //     // NOTE: Don't need push_back because we know the size
+            if(abs(full_coo_mtx->values[nz_idx]) < 1e-15 && !explitit_zero_warning_flag){ // NOTE: error tolerance too tight?
+                printf("WARNING: split_upper_lower_diagonal: explicit zero detected on diagonal at nz_idx %i.\n"
+                        "row: %i, col: %i, val: %f.\n", nz_idx, full_coo_mtx->I[nz_idx], full_coo_mtx->J[nz_idx], full_coo_mtx->values[nz_idx]);
+        //         explitit_zero_warning_flag = true;
+            }
+        //     (*D_coo_vec)[D_coo_vec_count] = full_coo_mtx->values[nz_idx];
+            ++D_coo_vec_count;
+        }
+        else{
+            printf("ERROR: split_upper_lower_diagonal: nz_idx %i cannot be segmented.\n", nz_idx);
+            exit(1);
+        }
+    }
+
+    // Sanity checks; TODO: Make optional
+    // All elements from full_coo_mtx need to be accounted for
+    int copied_elems_count = L_coo_mtx->nnz + U_coo_mtx->nnz + D_coo_vec_count; 
+    if(copied_elems_count != full_coo_mtx->nnz){
+        printf("ERROR: split_upper_lower_diagonal: only %i out of %i elements were copied from full_coo_mtx.\n", copied_elems_count, full_coo_mtx->nnz);
+        exit(1);
+    }
+
+}
+
+// TODO: MPI preprocessing will go here
+void preprocessing(
+    COOMtxData *coo_mat,
+    CRSMtxData *crs_mat,
+    CRSMtxData *crs_L,
+    CRSMtxData *crs_U,
+    std::vector<double> *x_star,
+    std::vector<double> *x_new,
+    std::vector<double> *x_old,
+    std::vector<double> *A_x_tmp,
+    std::vector<double> *D,
+    std::vector<double> *r,
+    std::vector<double> *b,
+    LoopParams *loop_params,
+    const std::string solver_type
+){
+    if(solver_type == "gauss-seidel"){
+        COOMtxData *coo_L = new COOMtxData;
+        COOMtxData *coo_U = new COOMtxData;
+
+        split_L_U(coo_mat, coo_L, coo_U);
+
+        coo_L->convert_to_crs(crs_L);
+        coo_U->convert_to_crs(crs_U);
+
+        delete coo_L;
+        delete coo_U;
+    }
+
+    coo_mat->convert_to_crs(crs_mat);
+
+    extract_diag(crs_mat, D);
+
+    x_star->resize(crs_mat->n_cols, 0);
+    b->resize(crs_mat->n_cols, 0);
+
+    // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
+    // Make b vector
+    generate_vector(b, crs_mat->n_cols, false, loop_params->init_b);
+    // ^ b should likely draw from A(min) to A(max) range of values
+
+    // Make initial x vector
+    generate_vector(x_old, crs_mat->n_cols, false, loop_params->init_x);
+
+    // Precalculate stopping criteria
+    calc_residual(crs_mat, x_old, b, r, A_x_tmp);
+    loop_params->stopping_criteria = loop_params->tol * infty_vec_norm(r); 
 }
