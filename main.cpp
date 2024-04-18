@@ -13,10 +13,6 @@
     #include "../Ultimate-SpMV/code/interface.hpp"
 #endif
 
-#ifdef USE_MPI
-    #include <mpi.h>
-#endif
-
 #include "utility_funcs.hpp"
 #include "io_funcs.hpp"
 #include "solvers.hpp"

@@ -20,7 +20,6 @@ SIGMA = 1
 # compiler options
 ifeq ($(COMPILER),gcc)
   CXX       = g++
-  MPICXX     = mpicxx # OpenMPI
   OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
@@ -28,7 +27,6 @@ endif
 
 ifeq ($(COMPILER),icc)
   CXX       = icpc
-  MPICXX     = mpiicpc # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
@@ -36,7 +34,6 @@ endif
 
 ifeq ($(COMPILER),icx)
   CXX       = icpx
-  MPICXX     = mpiicpc -cxx=icpx # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   AVX512_fix= #-Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
@@ -53,20 +50,12 @@ ifeq ($(COMPILER),nvcc)
 
   CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) 
   
-ifeq ($(USE_MPI),1)
-  $(error CUDA with MPI not yet supported)
-endif
 # TODO:
 $(error CUDA not yet supported)
 endif
 
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
-endif
-
-ifeq ($(USE_MPI),1)
-  CXXFLAGS  += -DUSE_MPI
-  CXX = $(MPICXX)
 endif
 
 ifeq ($(USE_USPMV),1)
