@@ -17,11 +17,11 @@ void generate_vector(
 );
 
 double calc_residual(
-    const CRSMtxData *crs_mat,
-    const std::vector<double> *x_new,
-    const std::vector<double> *b,
+    SparseMtxFormat *sparse_mat,
+    std::vector<double> *x,
+    std::vector<double> *b,
     std::vector<double> *r,
-    std::vector<double> *A_x_tmp
+    std::vector<double> *tmp
 );
 
 void start_time(
@@ -72,19 +72,12 @@ void split_upper_lower_diagonal(
     std::vector<double> *D_coo_vec
 );
 
-void preprocessing(
+void convert_to_crs(
     COOMtxData *coo_mat,
-    CRSMtxData *crs_mat,
-    CRSMtxData *crs_L,
-    CRSMtxData *crs_U,
-    std::vector<double> *x_star,
-    std::vector<double> *x_new,
-    std::vector<double> *x_old,
-    std::vector<double> *A_x_tmp,
-    std::vector<double> *D,
-    std::vector<double> *r,
-    std::vector<double> *b,
-    LoopParams *loop_params,
-    const std::string solver_type
+    CRSMtxData *crs_mat
+);
+
+void preprocessing(
+    argType *args
 );
 #endif /*UTILITY_FUNCS_H*/

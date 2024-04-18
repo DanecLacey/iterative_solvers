@@ -5,44 +5,19 @@
 #include <sys/time.h>
 
 #ifdef USE_EIGEN
-#include <Eigen/SparseLU>
-#include <unsupported/Eigen/SparseExtra>
+    #include <Eigen/SparseLU>
+    #include <unsupported/Eigen/SparseExtra>
+#endif
+
+#ifdef USE_USPMV
+    #include "../Ultimate-SpMV/code/interface.hpp"
 #endif
 
 #include "utility_funcs.hpp"
 #include "io_funcs.hpp"
 #include "solvers.hpp"
+#include "structs.hpp"
 #include "mmio.h"
-
-void solve(
-    CRSMtxData *crs_mat,
-    CRSMtxData *crs_L,
-    CRSMtxData *crs_U,
-    std::vector<double> *x_star,
-    std::vector<double> *x_new,
-    std::vector<double> *x_old,
-    std::vector<double> *b,
-    std::vector<double> *tmp,
-    std::vector<double> *D,
-    std::vector<double> *r,
-    std::vector<double> *normed_residuals,
-    double *calc_time_elapsed,
-    Flags *flags,
-    LoopParams *loop_params,
-    std::string solver_type
-){
-
-    if (solver_type == "jacobi"){
-        jacobi_solve(x_old, x_new, x_star, b, r, tmp, crs_mat, D, normed_residuals, calc_time_elapsed, flags, loop_params);
-    }
-    else if (solver_type == "gauss-seidel"){
-        gs_solve(x_old, x_star, b, r, tmp, crs_mat, crs_L, crs_U, D, normed_residuals, calc_time_elapsed, flags, loop_params);
-    }
-    else{
-        printf("ERROR: solve: This solver method is not implemented yet.\n");
-        exit(1);
-    }
-}
 
 int main(int argc, char *argv[]){
     /* Basic structure:
@@ -54,6 +29,7 @@ int main(int argc, char *argv[]){
      *          x_k = D^{-1}(b - (L + U)x_{k-1})
      *      Gauss-Seidel Iteration
      *          x_k = (D+L)^{-1}(b - Ux_{k-1}) 
+     *      Conjugate Gradient (under development)
      * until tolerance
      *      "||b - Ax_k|| / ||b - Ax_0|| < tol"
      * is reached
@@ -82,6 +58,7 @@ int main(int argc, char *argv[]){
         false // Compare to SparseLU direct solver
     };
 
+    // TODO: Split struct into const and nonconst fields
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
@@ -90,74 +67,71 @@ int main(int argc, char *argv[]){
         0.0, // init stopping criteria
         1e-14, // tolerance to stop iterations
         1.1, // init value for b
-        0.0 // init value for x
+        3.0 // init value for x
     };
 
-    // Declare and init common structs
+    argType *args = new argType;
+    SparseMtxFormat *sparse_mat = new SparseMtxFormat;
+    std::vector<double> x_star; 
+    std::vector<double> x_new;
+    std::vector<double> x_old;
+    std::vector<double> tmp;
+    std::vector<double> D;
+    std::vector<double> r; 
+    std::vector<double> b;
+    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1);
+    
+    args->coo_mat = coo_mat;
+    args->x_star = &x_star;
+    args->x_new = &x_new;
+    args->x_old = &x_old;
+    args->tmp = &tmp;
+    args->D = &D;
+    args->r = &r;
+    args->b = &b;
+    args->normed_residuals = &normed_residuals;
+    args->loop_params = &loop_params;
+    args->solver_type = solver_type;
+    args->flags = &flags;
+    args->matrix_file_name = &matrix_file_name;
+    args->sparse_mat = sparse_mat;
+
+#ifdef USE_USPMV
+    ScsData<double, int> *scs_mat = new ScsData<double, int>;
+    ScsData<double, int> *scs_L = new ScsData<double, int>;
+    ScsData<double, int> *scs_U = new ScsData<double, int>;
+    args->sparse_mat->scs_mat = scs_mat;
+    args->sparse_mat->scs_L = scs_L;
+    args->sparse_mat->scs_U = scs_U;
+#endif
     CRSMtxData *crs_mat = new CRSMtxData;
     CRSMtxData *crs_L = new CRSMtxData;
     CRSMtxData *crs_U = new CRSMtxData;
-    std::vector<double> x_star, b;
-    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1);
-    double total_time_elapsed;
-    double calc_time_elapsed;
-    std::vector<double> x_new(coo_mat->n_cols, 0);
-    std::vector<double> x_old(coo_mat->n_cols, 0);
-    std::vector<double> r(coo_mat->n_cols, 0);
-    std::vector<double> D(coo_mat->n_cols, 0);
-    std::vector<double> tmp(coo_mat->n_cols, 0); // temporary buffer for residual computations
+    args->sparse_mat->crs_mat = crs_mat;
+    args->sparse_mat->crs_L = crs_L;
+    args->sparse_mat->crs_U = crs_U;
 
-    preprocessing(
-        coo_mat,
-        crs_mat,
-        crs_L,
-        crs_U,
-        &x_star,
-        &x_new,
-        &x_old,
-        &tmp,
-        &D,
-        &r,
-        &b,
-        &loop_params,
-        solver_type
-    );
+    preprocessing(args);
 
-    solve(
-        crs_mat,
-        crs_L,
-        crs_U,
-        &x_star,
-        &x_new,
-        &x_old,
-        &b,
-        &tmp,
-        &D,
-        &r,
-        &normed_residuals,
-        &calc_time_elapsed,
-        &flags,
-        &loop_params,
-        solver_type
-    );
+    solve(args);
 
-    total_time_elapsed = end_time(&total_time_start, &total_time_end);
+    args->total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
-    postprocessing(
-        crs_mat, 
-        matrix_file_name, 
-        &x_star, 
-        &b,
-        &normed_residuals,
-        flags, 
-        total_time_elapsed, 
-        calc_time_elapsed,
-        loop_params,
-        solver_type
-    );
+    postprocessing(args);
 
+#ifdef USE_USPMV
+    delete scs_mat;
+    delete scs_L;
+    delete scs_U;
+#else
     delete crs_mat;
+    delete crs_L;
+    delete crs_U;
+#endif
+
     delete coo_mat;
+    delete sparse_mat;
+    delete args;
 
     return 0;
 }

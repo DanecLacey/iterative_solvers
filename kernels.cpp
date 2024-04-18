@@ -223,7 +223,7 @@ void spmv_crs(
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
             tmp += crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]];
 #ifdef DEBUG_MODE
-            // std::cout << mtx->val[nz_idx] << " * " << (*x)[mtx->col[nz_idx]] << " = " << (*y)[row_idx] << " at idx: " << row_idx << std::endl; 
+            std::cout << crs_mat->val[nz_idx] << " * " << (*x)[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
 #endif
         }
         (*y)[row_idx] = tmp;
@@ -244,6 +244,9 @@ void jacobi_normalize_x(
     for(int row_idx = 0; row_idx < n_rows; ++row_idx){
         adjusted_x = (*x_new)[row_idx] - (*D)[row_idx] * (*x_old)[row_idx];
         (*x_new)[row_idx] = ((*b)[row_idx] - adjusted_x)/ (*D)[row_idx];
+#ifdef DEBUG_MODE
+            std::cout << (*b)[row_idx] << " - " << adjusted_x << " / " << (*D)[row_idx] << " = " << (*x_new)[row_idx] << " at idx: " << row_idx << std::endl; 
+#endif
     }
 }
 

@@ -4,6 +4,12 @@
 #include <vector>
 #include <iostream>
 
+#ifdef USE_USPMV
+    #include "../Ultimate-SpMV/code/interface.hpp"
+#endif
+
+
+
 // NOTE: Is not having default bools really bad?
 struct Flags
 {
@@ -30,11 +36,11 @@ struct LoopParams
 
 struct CRSMtxData
 {
-    CRSMtxData(int _n_rows, int _n_cols, int _nnz, int *_row_ptr, int *_col, double *_val) 
-        : n_rows(_n_rows), n_cols(_n_cols), nnz(_nnz), row_ptr(_row_ptr), col(_col), val(_val) {};
+    // CRSMtxData(int _n_rows, int _n_cols, int _nnz, int *_row_ptr, int *_col, double *_val) 
+    //     : n_rows(_n_rows), n_cols(_n_cols), nnz(_nnz), row_ptr(_row_ptr), col(_col), val(_val) {};
 
-    CRSMtxData() 
-        : n_rows(0), n_cols(0), nnz(0), row_ptr(nullptr), col(nullptr), val(nullptr) {};
+    // CRSMtxData() 
+    //     : n_rows(0), n_cols(0), nnz(0), row_ptr(nullptr), col(nullptr), val(nullptr) {};
 
     int n_rows{};
     int n_cols{};
@@ -74,7 +80,7 @@ struct CRSMtxData
         }
         std::cout << "]" << std::endl;
 
-        std::cout << "valu = [";
+        std::cout << "values = [";
         for(int i = 0; i < nnz; ++i){
             std::cout << val[i] << ", ";
         }
@@ -179,51 +185,8 @@ void print(void)
             std::cout << values[i] << ", ";
         }
         std::cout << "]" << std::endl;
-    }
-
-void convert_to_crs(CRSMtxData *rhs)
-{
-    rhs->n_rows = this->n_rows;
-    rhs->n_cols = this->n_cols;
-    rhs->nnz = this->nnz;
-
-    rhs->row_ptr = new int[rhs->n_rows+1];
-    int *nnzPerRow = new int[rhs->n_rows];
-
-    rhs->col = new int[rhs->nnz];
-    rhs->val = new double[rhs->nnz];
-
-    for(int idx = 0; idx < rhs->nnz; ++idx)
-    {
-        rhs->col[idx] = this->J[idx];
-        rhs->val[idx] = this->values[idx];
-    }
-
-    for(int i = 0; i < rhs->n_rows; ++i)
-    { 
-        nnzPerRow[i] = 0;
-    }
-
-    //count nnz per row
-    for(int i=0; i < rhs->nnz; ++i)
-    {
-        ++nnzPerRow[this->I[i]];
-    }
-
-    rhs->row_ptr[0] = 0;
-    for(int i=0; i < rhs->n_rows; ++i)
-    {
-        rhs->row_ptr[i+1] = rhs->row_ptr[i]+nnzPerRow[i];
-    }
-
-    if(rhs->row_ptr[rhs->n_rows] != rhs->nnz)
-    {
-        printf("ERROR: converting to CRS.\n");
-        exit(1);
-    }
-
-    delete[] nnzPerRow;
 }
+
 
 
     // COOMtxData operator+(COOMtxData &rhs)
@@ -374,4 +337,55 @@ void convert_to_crs(CRSMtxData *rhs)
 //         diagFirst = true;
 //     }
 // }
+
+// #ifdef USE_USPMV
+// typedef struct {
+//     ScsData    *scs_mat,
+//     ScsData    *scs_L,
+//     ScsData    *scs_U
+// } scsArgType;
+// #endif
+
+// typedef struct {
+//     CRSMtxData *crs_mat,
+//     CRSMtxData    *crs_L,
+//     CRSMtxData    *crs_U
+// } crsArgType;
+
+struct SparseMtxFormat{
+#ifdef USE_USPMV
+    ScsData<double, int> *scs_mat;
+    ScsData<double, int> *scs_L;
+    ScsData<double, int> *scs_U;
+#endif
+    CRSMtxData *crs_mat;
+    CRSMtxData *crs_L;
+    CRSMtxData *crs_U;
+};
+
+// #ifdef USE_USPMV
+//     scsArgType scs_args
+// #else
+//     crsArgType crs_args
+// #endif
+
+struct argType {
+    COOMtxData *coo_mat;
+    SparseMtxFormat *sparse_mat;
+    std::vector<double> *x_star;
+    std::vector<double> *x_new;
+    std::vector<double> *x_old;
+    std::vector<double> *tmp;
+    std::vector<double> *D;
+    std::vector<double> *r;
+    std::vector<double> *b;
+    std::vector<double> *normed_residuals;
+    LoopParams *loop_params;
+    std::string solver_type;
+    Flags *flags;
+    const std::string *matrix_file_name;
+    double calc_time_elapsed;
+    double total_time_elapsed;
+    int vec_size;
+};
 #endif /*STRUCTS_H*/

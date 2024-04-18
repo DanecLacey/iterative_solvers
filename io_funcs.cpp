@@ -22,7 +22,7 @@ void assign_cli_inputs(
     )
 {
     if(argc != 3){
-        printf("ERROR: assign_cli_inputs: Please only select a .mtx file name and solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -t (Trivial)].\n");
+        printf("ERROR: assign_cli_inputs: Please only select a .mtx file name and solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient)].\n");
         exit(1);
     }
 
@@ -35,11 +35,11 @@ void assign_cli_inputs(
     else if(st == "-gs"){
         *solver_type = "gauss-seidel";
     }
-    // else if(st == "-cg"){
-    //     *solver_type = "conjugate-gradient";
-    // }
+    else if(st == "-cg"){
+        *solver_type = "conjugate-gradient";
+    }
     else{
-        printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -t (Trivial)].\n");
+        printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient)].\n");
         exit(1);
     }
 }
@@ -288,23 +288,30 @@ void write_comparison_to_file(
 }
 
 void postprocessing(
-    CRSMtxData *crs_mat,
-    std::string matrix_file_name,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    std::vector<double> *normed_residuals,
-    Flags flags,
-    double total_time_elapsed,
-    double calc_time_elapsed,
-    LoopParams loop_params,
-    std::string solver_type
+    argType *args
 ){
-    if(flags.compare_direct){
-        compare_with_direct(crs_mat, matrix_file_name, loop_params, x_star, (*normed_residuals)[loop_params.residual_count]);
-    }
+    std::vector<double> *x_new = args->x_new;
+    std::vector<double> *x_star = args->x_star;
+    std::vector<double> *x_old = args->x_old;
+    std::vector<double> *tmp = args->tmp;
+    std::vector<double> *D = args->D;
+    std::vector<double> *r = args->r;
+    std::vector<double> *b = args->b;
+    std::vector<double> *normed_residuals = args->normed_residuals;
+    std::string solver_type = args->solver_type;
+    LoopParams *loop_params = args->loop_params;
+    const Flags *flags = args->flags;
+    double total_time_elapsed = args->total_time_elapsed;
+    double calc_time_elapsed = args->calc_time_elapsed;
+    SparseMtxFormat *sparse_mat = args->sparse_mat;
 
-    if(flags.print_summary){
-        summary_output(x_star, b, normed_residuals, &solver_type, loop_params, flags, total_time_elapsed, calc_time_elapsed);
+    // TODO: include SCS vs. CRS comparison for validation
+    // if(flags.compare_direct){
+    //     compare_with_direct(crs_mat, matrix_file_name, loop_params, x_star, (*normed_residuals)[loop_params.residual_count]);
+    // }
+
+    if(flags->print_summary){
+        summary_output(x_star, b, normed_residuals, &solver_type, *loop_params, *flags, total_time_elapsed, calc_time_elapsed);
     }
     
     //sufficent to just print to stdout for now

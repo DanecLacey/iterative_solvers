@@ -48,15 +48,6 @@ void write_comparison_to_file(
 );
 
 void postprocessing(
-    CRSMtxData *crs_mat,
-    std::string matrix_file_name,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    std::vector<double> *normed_residuals,
-    Flags flags,
-    double total_time_elapsed,
-    double calc_time_elapsed,
-    LoopParams loop_params,
-    std::string solver_type
+    argType *args
 );
 #endif /*IO_FUNCS_H*/

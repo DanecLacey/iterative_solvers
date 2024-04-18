@@ -1,9 +1,16 @@
+# Options: gcc, icc, icx
 COMPILER=gcc
 
 DEBUG_MODE = 0
+DEBUG_MODE_FINE = 0
+USE_MPI = 1
 USE_LIKWID = 0
 USE_EIGEN = 0
 USE_GPROF = 0
+
+USE_USPMV = 0
+CHUNK_SIZE = 8
+SIGMA = 1
 
 # TODO
 # USE_METIS = 1
@@ -13,13 +20,15 @@ USE_GPROF = 0
 # compiler options
 ifeq ($(COMPILER),gcc)
   CXX       = g++
-  OPT_LEVEL = -Ofast
+  MPICXX     = mpicxx # OpenMPI
+  OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
 endif
 
 ifeq ($(COMPILER),icc)
   CXX       = icpc
+  MPICXX     = mpiicpc # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
@@ -27,7 +36,7 @@ endif
 
 ifeq ($(COMPILER),icx)
   CXX       = icpx
-  MPICXX     = mpiicpc -cxx=icpx
+  MPICXX     = mpiicpc -cxx=icpx # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   AVX512_fix= #-Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
@@ -37,6 +46,18 @@ endif
 
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
+endif
+
+ifeq ($(USE_MPI),1)
+  CXXFLAGS  += -DUSE_MPI
+  CXX = $(MPICXX)
+endif
+
+ifeq ($(USE_USPMV),1)
+  CHUNK_SIZE = 2
+  SIGMA = 2
+  VECTOR_LENGTH = 4 # Assuming AVX instructions
+  CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
 endif
 
 ifeq ($(USE_LIKWID),1)

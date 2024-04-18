@@ -81,17 +81,29 @@ double infty_mat_norm(
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
 void calc_residual(
-    const CRSMtxData *crs_mat,
-    const std::vector<double> *x,
-    const std::vector<double> *b,
+    SparseMtxFormat *sparse_mat,
+    std::vector<double> *x,
+    std::vector<double> *b,
     std::vector<double> *r,
-    std::vector<double> *A_x_tmp
+    std::vector<double> *tmp
 ){
+    //Unpack args 
     #pragma omp parallel
     {
-        spmv_crs(A_x_tmp, crs_mat, x);
-
-        subtract_vectors(r, b, A_x_tmp);
+#ifdef USE_USPMV
+        spmv_omp_scs<double, int>(
+            sparse_mat->scs_mat->C, // C
+            sparse_mat->scs_mat->n_chunks,
+            &(sparse_mat->scs_mat->chunk_ptrs)[0],
+            &(sparse_mat->scs_mat->chunk_lengths)[0],
+            &(sparse_mat->scs_mat->col_idxs)[0],
+            &(sparse_mat->scs_mat->values)[0],
+            &(*x)[0],
+            &(*tmp)[0]);
+#else
+        spmv_crs(tmp, sparse_mat->crs_mat, x);
+#endif
+        subtract_vectors(r, b, tmp);
     }
 }
 
@@ -149,16 +161,13 @@ void gen_neg_inv(
 }
 
 void extract_diag(
-    const CRSMtxData *crs_mat,
+    const COOMtxData *coo_mat,
     std::vector<double> *diag
 ){
     #pragma omp parallel for schedule (static)
-    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-            if(row_idx == crs_mat->col[nz_idx]){
-                (*diag)[row_idx] = crs_mat->val[nz_idx];
-                break;
-            }
+    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
+        if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
+            (*diag)[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
         }
     }
 }
@@ -288,51 +297,153 @@ void split_L_U(
 
 }
 
+
+void convert_to_crs(
+    COOMtxData *coo_mat,
+    CRSMtxData *crs_mat
+    )
+{
+    crs_mat->n_rows = coo_mat->n_rows;
+    crs_mat->n_cols = coo_mat->n_cols;
+    crs_mat->nnz = coo_mat->nnz;
+
+    crs_mat->row_ptr = new int[crs_mat->n_rows+1];
+    int *nnzPerRow = new int[crs_mat->n_rows];
+
+    crs_mat->col = new int[crs_mat->nnz];
+    crs_mat->val = new double[crs_mat->nnz];
+
+    for(int idx = 0; idx < crs_mat->nnz; ++idx)
+    {
+        crs_mat->col[idx] = coo_mat->J[idx];
+        crs_mat->val[idx] = coo_mat->values[idx];
+    }
+
+    for(int i = 0; i < crs_mat->n_rows; ++i)
+    { 
+        nnzPerRow[i] = 0;
+    }
+
+    //count nnz per row
+    for(int i=0; i < crs_mat->nnz; ++i)
+    {
+        ++nnzPerRow[coo_mat->I[i]];
+    }
+
+    crs_mat->row_ptr[0] = 0;
+    for(int i=0; i < crs_mat->n_rows; ++i)
+    {
+        crs_mat->row_ptr[i+1] = crs_mat->row_ptr[i]+nnzPerRow[i];
+    }
+
+    if(crs_mat->row_ptr[crs_mat->n_rows] != crs_mat->nnz)
+    {
+        printf("ERROR: converting to CRS.\n");
+        exit(1);
+    }
+
+    delete[] nnzPerRow;
+}
+
 // TODO: MPI preprocessing will go here
 void preprocessing(
-    COOMtxData *coo_mat,
-    CRSMtxData *crs_mat,
-    CRSMtxData *crs_L,
-    CRSMtxData *crs_U,
-    std::vector<double> *x_star,
-    std::vector<double> *x_new,
-    std::vector<double> *x_old,
-    std::vector<double> *A_x_tmp,
-    std::vector<double> *D,
-    std::vector<double> *r,
-    std::vector<double> *b,
-    LoopParams *loop_params,
-    const std::string solver_type
+    argType *args
 ){
-    if(solver_type == "gauss-seidel"){
+    if(args->solver_type == "gauss-seidel"){
         COOMtxData *coo_L = new COOMtxData;
         COOMtxData *coo_U = new COOMtxData;
 
-        split_L_U(coo_mat, coo_L, coo_U);
+        split_L_U(args->coo_mat, coo_L, coo_U);
 
-        coo_L->convert_to_crs(crs_L);
-        coo_U->convert_to_crs(crs_U);
+#ifdef USE_USPMV
+        // TODO: Find a better solution than this crap
+        MtxData<double, int> *mtx_L = new MtxData<double, int>;
+        mtx_L->n_rows = coo_L->n_rows;
+        mtx_L->n_cols = coo_L->n_cols;
+        mtx_L->nnz = coo_L->nnz;
+        mtx_L->is_sorted = true; //TODO
+        mtx_L->is_symmetric = false; //TODO
+        mtx_L->I = coo_L->I;
+        mtx_L->J = coo_L->J;
+        mtx_L->values = coo_L->values;
+        convert_to_scs<double, int>(mtx_L, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_L);
+
+        MtxData<double, int> *mtx_U = new MtxData<double, int>;
+        mtx_U->n_rows = coo_U->n_rows;
+        mtx_U->n_cols = coo_U->n_cols;
+        mtx_U->nnz = coo_U->nnz;
+        mtx_U->is_sorted = true; //TODO
+        mtx_U->is_symmetric = false; //TODO
+        mtx_U->I = coo_U->I;
+        mtx_U->J = coo_U->J;
+        mtx_U->values = coo_U->values;
+        convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_U);
+#endif
+        convert_to_crs(coo_L, args->sparse_mat->crs_L);
+        convert_to_crs(coo_U, args->sparse_mat->crs_U);
 
         delete coo_L;
         delete coo_U;
     }
 
-    coo_mat->convert_to_crs(crs_mat);
+#ifdef USE_USPMV
+    MtxData<double, int> *mtx_mat = new MtxData<double, int>;
+    mtx_mat->n_rows = args->coo_mat->n_rows;
+    mtx_mat->n_cols = args->coo_mat->n_cols;
+    mtx_mat->nnz = args->coo_mat->nnz;
+    mtx_mat->is_sorted = true; //TODO
+    mtx_mat->is_symmetric = false; //TODO
+    mtx_mat->I = args->coo_mat->I;
+    mtx_mat->J = args->coo_mat->J;
+    mtx_mat->values = args->coo_mat->values;
 
-    extract_diag(crs_mat, D);
+    // NOTE: Symmetric permutation, i.e. rows and columns
+    convert_to_scs(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
+    permute_scs_cols(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
+    args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
+#else
+    args->vec_size = args->coo_mat->n_cols;
+#endif
+    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
 
-    x_star->resize(crs_mat->n_cols, 0);
-    b->resize(crs_mat->n_cols, 0);
+    // Resize all working arrays, now we know the right size
+    args->x_star->resize(args->vec_size, 0);
+    args->x_new->resize(args->vec_size, 0);
+    args->x_old->resize(args->vec_size, 0);
+    args->tmp->resize(args->vec_size, 0);
+    args->D->resize(args->vec_size, 0);
+    args->r->resize(args->vec_size, 0);
+    args->b->resize(args->vec_size, 0);
+
+    extract_diag(args->coo_mat, args->D);
 
     // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
-    generate_vector(b, crs_mat->n_cols, false, loop_params->init_b);
+    generate_vector(args->b, args->vec_size, false, args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
-    generate_vector(x_old, crs_mat->n_cols, false, loop_params->init_x);
+    generate_vector(args->x_old, args->vec_size, false, args->loop_params->init_x);
+
+// TODO: symmetric permutations!
+#ifdef USE_USPMV
+//     // Need to permute these vectors in accordance with SIGMA if using USpMV library
+    // std::vector<double> D_perm(args->n_cols, 0);
+    // apply_permutation(&(D_perm)[0], &(*args->D)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
+    // std::swap(D_perm, (*args->D));
+
+    // std::vector<double> b_perm(args->n_cols, 0);
+    // apply_permutation(&(b_perm)[0], &(*args->b)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
+    // std::swap(b_perm, (*args->b));
+
+//     // NOTE: Permuted w.r.t. columns due to symmetric permutation
+//     std::vector<double> x_old_perm(args->n_cols, 0);
+//     apply_permutation(&(x_old_perm)[0], &(*args->x_old)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
+//     std::swap(x_old_perm, *(args->x_old));
+#endif
 
     // Precalculate stopping criteria
-    calc_residual(crs_mat, x_old, b, r, A_x_tmp);
-    loop_params->stopping_criteria = loop_params->tol * infty_vec_norm(r); 
+    calc_residual(args->sparse_mat, args->x_old, args->b, args->r, args->tmp);
+
+    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm(args->r); 
 }
