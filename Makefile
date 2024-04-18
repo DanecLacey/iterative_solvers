@@ -1,9 +1,8 @@
-# Options: gcc, icc, icx, nvcc
+# Options: gcc, icc, icx
 COMPILER=gcc
 
 DEBUG_MODE = 0
 DEBUG_MODE_FINE = 0
-USE_MPI = 0
 USE_LIKWID = 0
 USE_EIGEN = 0
 USE_GPROF = 0
@@ -20,7 +19,6 @@ SIGMA = 1
 # compiler options
 ifeq ($(COMPILER),gcc)
   CXX       = g++
-  MPICXX     = mpicxx # OpenMPI
   OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
@@ -28,7 +26,6 @@ endif
 
 ifeq ($(COMPILER),icc)
   CXX       = icpc
-  MPICXX     = mpiicpc # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
@@ -36,7 +33,6 @@ endif
 
 ifeq ($(COMPILER),icx)
   CXX       = icpx
-  MPICXX     = mpiicpc -cxx=icpx # Intel MPI
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   AVX512_fix= #-Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
@@ -44,29 +40,8 @@ ifeq ($(COMPILER),icx)
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH)
 endif
 
-ifeq ($(COMPILER),nvcc)
-  CXX       = nvcc
-  MPICXX     = # TODO
-  OPT_LEVEL = -O3
-  #OPT_ARCH  = -xhost # TODO: Can I do this?
-  HOST_COMPILER_FLAGS= -Xcompiler -Wall
-
-  CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) 
-  
-ifeq ($(USE_MPI),1)
-  $(error CUDA with MPI not yet supported)
-endif
-# TODO:
-$(error CUDA not yet supported)
-endif
-
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
-endif
-
-ifeq ($(USE_MPI),1)
-  CXXFLAGS  += -DUSE_MPI
-  CXX = $(MPICXX)
 endif
 
 ifeq ($(USE_USPMV),1)
@@ -74,9 +49,6 @@ ifeq ($(USE_USPMV),1)
   SIGMA = 2
   VECTOR_LENGTH = 4 # Assuming AVX instructions
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
-  ifeq ($(COMPILER),nvcc)
-    $(error CUDA with USpMV not yet supported)
-  endif
 endif
 
 ifeq ($(USE_LIKWID),1)

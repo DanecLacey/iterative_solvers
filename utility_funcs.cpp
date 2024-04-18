@@ -405,8 +405,6 @@ void preprocessing(
     convert_to_scs(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
     permute_scs_cols(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
     args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
-    // args->sparse_mat->scs_mat->print();
-    // exit(1);
 #else
     args->vec_size = args->coo_mat->n_cols;
 #endif
@@ -423,10 +421,8 @@ void preprocessing(
 
     extract_diag(args->coo_mat, args->D);
 
-    // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
     generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_b);
-    // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
     generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_x);
@@ -451,12 +447,13 @@ void preprocessing(
     // Precalculate stopping criteria
     calc_residual(args->sparse_mat, args->x_old, args->b, args->r, args->tmp);
 
+#ifdef DEBUG_MODE
     printf("[");
     for(int i = 0; i < args->r->size(); ++i){
         std::cout << (*args->r)[i] << ",";
     }
     printf("]\n");
-    exit(1);
+#endif
 
     args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm(args->r); 
 }
