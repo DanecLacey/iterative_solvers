@@ -21,11 +21,12 @@ void generate_vector(
     std::vector<double> *vec_to_populate,
     int size,
     bool rand_flag,
+    std::vector<double> *values,
     double initial_val
 ){
     if(rand_flag){
-        double upper_bound = 50000;
-        double lower_bound = 0;
+        double upper_bound = *(std::max_element(std::begin(*values), std::end(*values)));
+        double lower_bound = *(std::min_element(std::begin(*values), std::end(*values)));
         srand(time(nullptr));
 
         double range = (upper_bound - lower_bound); 
@@ -181,6 +182,8 @@ void compare_with_direct(
 ){
     
 #ifdef USE_EIGEN
+    printf("ERROR: eigen library depreciated (for now).\n");
+    exit(1);
     Eigen::SparseMatrix<double> A;
     Eigen::loadMarket(A, matrix_file_name);
     A.makeCompressed();
@@ -192,7 +195,8 @@ void compare_with_direct(
 
     std::vector<double> b_vec(eigen_n_cols);
 
-    generate_vector(&b_vec, eigen_n_cols, false, loop_params.init_b);
+    // TODO: fix signature
+    // generate_vector(&b_vec, eigen_n_cols, false, loop_params.init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     Eigen::VectorXd b = Eigen::VectorXd::Map(&b_vec[0], b_vec.size());
@@ -401,6 +405,8 @@ void preprocessing(
     convert_to_scs(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
     permute_scs_cols(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
     args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
+    // args->sparse_mat->scs_mat->print();
+    // exit(1);
 #else
     args->vec_size = args->coo_mat->n_cols;
 #endif
@@ -419,31 +425,38 @@ void preprocessing(
 
     // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
-    generate_vector(args->b, args->vec_size, false, args->loop_params->init_b);
+    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
-    generate_vector(args->x_old, args->vec_size, false, args->loop_params->init_x);
+    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_x);
 
 // TODO: symmetric permutations!
 #ifdef USE_USPMV
-//     // Need to permute these vectors in accordance with SIGMA if using USpMV library
-    // std::vector<double> D_perm(args->n_cols, 0);
-    // apply_permutation(&(D_perm)[0], &(*args->D)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
-    // std::swap(D_perm, (*args->D));
+    // Need to permute these vectors in accordance with SIGMA if using USpMV library
+    std::vector<double> D_perm(args->vec_size, 0);
+    apply_permutation(&(D_perm)[0], &(*args->D)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    std::swap(D_perm, (*args->D));
 
-    // std::vector<double> b_perm(args->n_cols, 0);
-    // apply_permutation(&(b_perm)[0], &(*args->b)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
-    // std::swap(b_perm, (*args->b));
+    std::vector<double> b_perm(args->vec_size, 0);
+    apply_permutation(&(b_perm)[0], &(*args->b)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    std::swap(b_perm, (*args->b));
 
-//     // NOTE: Permuted w.r.t. columns due to symmetric permutation
-//     std::vector<double> x_old_perm(args->n_cols, 0);
-//     apply_permutation(&(x_old_perm)[0], &(*args->x_old)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->n_cols);
-//     std::swap(x_old_perm, *(args->x_old));
+    // NOTE: Permuted w.r.t. columns due to symmetric permutation
+    std::vector<double> x_old_perm(args->vec_size, 0);
+    apply_permutation(&(x_old_perm)[0], &(*args->x_old)[0], &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
+    std::swap(x_old_perm, *(args->x_old));
 #endif
 
     // Precalculate stopping criteria
     calc_residual(args->sparse_mat, args->x_old, args->b, args->r, args->tmp);
+
+    printf("[");
+    for(int i = 0; i < args->r->size(); ++i){
+        std::cout << (*args->r)[i] << ",";
+    }
+    printf("]\n");
+    exit(1);
 
     args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm(args->r); 
 }

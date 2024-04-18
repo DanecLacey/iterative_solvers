@@ -13,6 +13,10 @@
     #include "../Ultimate-SpMV/code/interface.hpp"
 #endif
 
+#ifdef USE_MPI
+    #include <mpi.h>
+#endif
+
 #include "utility_funcs.hpp"
 #include "io_funcs.hpp"
 #include "solvers.hpp"
@@ -55,14 +59,15 @@ int main(int argc, char *argv[]){
         true, // print_residuals
         true, // convergence_flag. TODO: really shouldn't be here
         false, // apply preconditioner TODO: not implemented
-        false // Compare to SparseLU direct solver
+        false, // Compare to SparseLU direct solver
+        false // generate random data for b and initial x vectors
     };
 
     // TODO: Split struct into const and nonconst fields
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
-        50, // calculate residual every n iterations
+        1, // calculate residual every n iterations
         3000, // maximum iteration count
         0.0, // init stopping criteria
         1e-14, // tolerance to stop iterations

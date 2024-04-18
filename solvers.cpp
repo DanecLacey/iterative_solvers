@@ -256,12 +256,19 @@ void solve(
     }
     else if (args->solver_type == "gauss-seidel"){
         std::swap(*x, *(args->x_star));
-    }    
+    }
     
     
     // Record final residual with approximated solution vector x
     calc_residual(sparse_mat, args->x_star, b, r, tmp);
     (*(args->normed_residuals))[args->loop_params->residual_count] = infty_vec_norm(r);
+
+#ifdef USE_USPMV
+    // Bring final result vector out of permuted space
+    std::vector<double> x_star_perm(args->vec_size, 0);
+    apply_permutation(&(x_star_perm)[0], &(*args->x_star)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    std::swap(x_star_perm, (*args->x_star));
+#endif
 
     // End timer
     args->calc_time_elapsed = end_time(&calc_time_start, &calc_time_end);

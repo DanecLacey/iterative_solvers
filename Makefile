@@ -1,9 +1,9 @@
-# Options: gcc, icc, icx
+# Options: gcc, icc, icx, nvcc
 COMPILER=gcc
 
 DEBUG_MODE = 0
 DEBUG_MODE_FINE = 0
-USE_MPI = 1
+USE_MPI = 0
 USE_LIKWID = 0
 USE_EIGEN = 0
 USE_GPROF = 0
@@ -44,6 +44,22 @@ ifeq ($(COMPILER),icx)
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH)
 endif
 
+ifeq ($(COMPILER),nvcc)
+  CXX       = nvcc
+  MPICXX     = # TODO
+  OPT_LEVEL = -O3
+  #OPT_ARCH  = -xhost # TODO: Can I do this?
+  HOST_COMPILER_FLAGS= -Xcompiler -Wall
+
+  CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) 
+  
+ifeq ($(USE_MPI),1)
+  $(error CUDA with MPI not yet supported)
+endif
+# TODO:
+$(error CUDA not yet supported)
+endif
+
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
 endif
@@ -58,6 +74,9 @@ ifeq ($(USE_USPMV),1)
   SIGMA = 2
   VECTOR_LENGTH = 4 # Assuming AVX instructions
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
+  ifeq ($(COMPILER),nvcc)
+    $(error CUDA with USpMV not yet supported)
+  endif
 endif
 
 ifeq ($(USE_LIKWID),1)

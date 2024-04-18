@@ -19,6 +19,7 @@ struct Flags
     bool convergence_flag;
     bool precondition;
     bool compare_direct;
+    bool random_data;
 };
 
 // TODO: Make user-enetered option available
