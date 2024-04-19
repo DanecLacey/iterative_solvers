@@ -45,13 +45,11 @@ ifeq ($(COMPILER),nvcc)
   CXX       = nvcc
   MPICXX     = # TODO
   OPT_LEVEL = -O3
-  #OPT_ARCH  = -xhost # TODO: Can I do this?
-  HOST_COMPILER_FLAGS= -Xcompiler -Wall
+  OPT_HOST_ARCH  = #-tp=native how to optimizer host code for particular arch?
+  OPT_DEVICE_ARCH  = -gencode arch=compute_86,code=sm_86 # Assuming A40 card
+  HOST_COMPILER_FLAGS= -Xcompiler -Wall 
 
-  CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) 
-  
-# TODO:
-$(error CUDA not yet supported)
+  CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) $(OPT_HOST_ARCH) $(OPT_DEVICE_ARCH)
 endif
 
 ifeq ($(DEBUG_MODE),1)
