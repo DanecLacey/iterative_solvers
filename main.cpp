@@ -63,7 +63,7 @@ int main(int argc, char *argv[]){
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
-        1, // calculate residual every n iterations
+        50, // calculate residual every n iterations
         3000, // maximum iteration count
         0.0, // init stopping criteria
         1e-14, // tolerance to stop iterations
@@ -80,7 +80,7 @@ int main(int argc, char *argv[]){
     std::vector<double> D;
     std::vector<double> r; 
     std::vector<double> b;
-    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1);
+    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1, 0.0);
     
     args->coo_mat = coo_mat;
     args->x_star = &x_star;
@@ -96,6 +96,12 @@ int main(int argc, char *argv[]){
     args->flags = &flags;
     args->matrix_file_name = &matrix_file_name;
     args->sparse_mat = sparse_mat;
+
+#ifdef __CUDACC__
+    args->d_x_star = d_x_star; 
+    args->d_x_new = d_x_new;
+    args->d_x_old = d_x_old;
+#endif
 
 #ifdef USE_USPMV
     ScsData<double, int> *scs_mat = new ScsData<double, int>;
@@ -133,6 +139,23 @@ int main(int argc, char *argv[]){
     delete coo_mat;
     delete sparse_mat;
     delete args;
+
+#ifdef __CUDACC__
+    cudaFree(d_x_star);
+    cudaFree(d_x_new);
+    cudaFree(d_x_old);
+    cudaFree(d_row_ptr);
+    cudaFree(d_col);
+    cudaFree(d_val);
+    cudaFree(d_stopping_criteria);
+
+    delete d_x_star; 
+    delete d_x_new;
+    delete d_x_old;
+    delete d_row_ptr;
+    delete d_col;
+    delete d_val;
+#endif
 
     return 0;
 }

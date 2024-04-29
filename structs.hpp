@@ -33,6 +33,9 @@ struct LoopParams
     double tol;
     double init_b;
     double init_x;
+#ifdef __CUDACC__
+    double d_stopping_criteria;
+#endif
 };
 
 struct CRSMtxData
@@ -388,5 +391,13 @@ struct argType {
     double calc_time_elapsed;
     double total_time_elapsed;
     int vec_size;
+#ifdef __CUDACC__
+    double *d_x_star; 
+    double *d_x_new;
+    double *d_x_old;
+    int *d_row_ptr;
+    int *d_col;
+    double *d_val; 
+#endif
 };
 #endif /*STRUCTS_H*/

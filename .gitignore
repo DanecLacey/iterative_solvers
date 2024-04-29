@@ -2,3 +2,4 @@
 .vscode
 iterative_solvers
 dynamic_lib
+CUDA_tests/

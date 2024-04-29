@@ -65,7 +65,7 @@ void sum_vectors(
     }
 }
 
-void subtract_vectors(
+void subtract_vectors_cpu(
     std::vector<double> *result_vec,
     const std::vector<double> *vec1,
     const std::vector<double> *vec2
@@ -86,6 +86,21 @@ void subtract_vectors(
         (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
     }
 }
+
+#ifdef __CUDACC__
+__global__
+void subtract_vectors_gpu(
+    double *result_vec,
+    const double *vec1,
+    const double *vec2
+){
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int i = block_offset + thread_idx_in_block;
+
+    if(i < N){(*result_vec)[i] = (*vec1)[i] - (*vec2)[i];}
+}
+#endif
 
 void sum_matrices(
     COOMtxData *sum_mtx,
@@ -208,7 +223,7 @@ void sum_matrices(
 
 }
 
-void spmv_crs(
+void spmv_crs_cpu(
     std::vector<double> *y,
     const CRSMtxData *crs_mat,
     const std::vector<double> *x
@@ -230,7 +245,39 @@ void spmv_crs(
     }
 }
 
-void jacobi_normalize_x(
+// TODO: Take from USpMV library later?
+#ifdef __CUDACC__
+__global__
+void spmv_crs_gpu(
+    const double *d_val,
+    const int *d_col,
+    const int *d_row_ptr,
+    double *d_y,
+    const double *d_x,
+    const int d_n_rows
+    )
+{
+    // Idea is for each thread to be responsible for one row
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int i = block_offset + thread_idx_in_block;
+
+    if(i < n_rows){
+        double tmp = 0.0;
+
+        for(int nz_idx = d_row_ptr[i]; nz_idx < d_row_ptr[i+1]; ++nz_idx){
+            tmp += d_val[nz_idx] * d_x[d_col[nz_idx]];
+        }
+
+        d_y[i] = tmp;
+    }
+
+    // TODO: When is this necessary?
+    // __synchthreads();
+}
+#endif
+
+void jacobi_normalize_x_cpu(
     std::vector<double> *x_new,
     const std::vector<double> *x_old,
     const std::vector<double> *D,
@@ -249,6 +296,26 @@ void jacobi_normalize_x(
 #endif
     }
 }
+
+#ifdef __CUDACC__
+__global__
+void jacobi_normalize_x_gpu(
+    double *d_x_new,
+    const double *d_x_old,
+    const double *d_D,
+    const double *d_b,
+    int n_rows
+){
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int i = block_offset + thread_idx_in_block;
+
+    if(i < n_rows){
+        double adjusted_x = d_x_new[i] - d_D[i] * d_x_old[i];
+        d_x_new[i] = (d_b[i] - adjusted_x) / d_D[i];
+    }
+}
+#endif
 
 void spltsv_crs(
     const CRSMtxData *crs_L,
@@ -270,3 +337,151 @@ void spltsv_crs(
         (*x)[row_idx] = ((*b_Ux)[row_idx] - sum)/(*D)[row_idx];
     }
 }
+
+double infty_vec_norm_cpu(
+    const std::vector<double> *vec
+){
+    double max_abs = 0.;
+    double curr_abs;
+    for (int i = 0; i < vec->size(); ++i){
+        curr_abs = std::abs((*vec)[i]);
+        if ( curr_abs > max_abs){
+            max_abs = curr_abs; 
+        }
+    }
+
+    return max_abs;
+}
+
+#ifdef __CUDACC__
+// Begin with all threads unlocked
+__device__ int mutex = 0;
+
+__device__ void acquire_semaphore(int *mutex){
+    while(atomicCAS(mutex, 0, 1) == 1);
+}
+
+__device__ void release_semaphore(int *mutex){
+    *mutex = 0;
+    __threadfence();
+}
+
+__global__
+void infty_vec_norm_gpu(
+    const double *d_vec,
+    double *d_infty_norm,
+    double n_rows
+){
+    const unsigned int thread_idx_in_block = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * blockDim.x;
+    const unsigned int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    
+
+    // Is this necessary?
+    // if(thread_idx < N){
+
+        // Shared memory region, same size as block
+        // Will be present on each block
+        __shared__ double shared_mem[THREADS_PER_BLOCK];
+
+        double tmp = 0.0;
+        while(thread_idx + offset < N){
+            // NOTE: Absolute values are taken here, and don't need to be done
+            // again for comparing block maxes
+            tmp = max(abs(tmp), abs(d_vec[thread_idx + offset]));
+
+            offset += stride;
+        }
+
+        shared_mem[threadIdx.x] = tmp;
+
+        __syncthreads();
+
+        // Reduction per block
+        unsigned int i = blockDim.x/2;
+        while(i != 0){
+            if(threadIdx.x < i){
+                shared_mem[threadIdx.x] = max(shared_mem[threadIdx.x], shared_mem[threadIdx.x + i]);
+            }
+            __syncthreads();
+            i /= 2;
+        } 
+
+        // Begin locks
+        __syncthreads();
+        if(threadIdx.x == 0){
+              acquire_semaphore(&mutex);
+        }
+
+        __syncthreads();
+
+        // Critical section
+        if(threadIdx.x == 0){
+            *d_infty_norm = (*d_infty_norm > shared_mem[0]) ? *d_infty_norm : shared_mem[0];
+        }
+
+        __threadfence();
+        __syncthreads();
+
+        if (threadIdx.x == 0){
+            release_semaphore(&mutex);
+        }
+
+        __syncthreads();
+        // End locks
+    // }
+
+}
+#endif
+
+/* Residual here is the distance from A*x_new to b, where the norm
+ is the infinity norm: ||A*x_new-b||_infty */
+void calc_residual_cpu(
+    SparseMtxFormat *sparse_mat,
+    std::vector<double> *x,
+    std::vector<double> *b,
+    std::vector<double> *r,
+    std::vector<double> *tmp
+){
+    //Unpack args 
+    #pragma omp parallel
+    {
+#ifdef USE_USPMV
+        spmv_omp_scs<double, int>(
+            sparse_mat->scs_mat->C, // C
+            sparse_mat->scs_mat->n_chunks,
+            &(sparse_mat->scs_mat->chunk_ptrs)[0],
+            &(sparse_mat->scs_mat->chunk_lengths)[0],
+            &(sparse_mat->scs_mat->col_idxs)[0],
+            &(sparse_mat->scs_mat->values)[0],
+            &(*x)[0],
+            &(*tmp)[0]);
+#else
+        spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
+#endif
+        subtract_vectors_cpu(r, b, tmp);
+    }
+}
+
+#ifdef __CUDACC__
+__global__
+void calc_residual_gpu(
+    int *d_row_ptr,
+    int *d_col,
+    double *d_val,
+    double *d_x,
+    double *d_r,
+    double *d_b,
+    double *d_tmp,
+    int d_n_rows
+){
+    // TODO: SCS
+
+    // TODO: Block and thread count?
+    spmv_crs_gpu<<<1,1>>>(d_val, d_col, d_row_ptr, d_tmp, d_x, d_n_rows);
+
+    subtract_vectors_gpu<<<1,1>>>(d_r, d_b, d_tmp);
+}
+#endif
