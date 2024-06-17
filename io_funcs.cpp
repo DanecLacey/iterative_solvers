@@ -212,18 +212,16 @@ void read_mtx(
 
 void residuals_output(
     bool print_residuals,
-    std::vector<double> *residuals_vec,
+    double* residuals_vec,
     LoopParams loop_params
 ){
     for(int i = 0; i < loop_params.residual_count; ++i){
-        std::cout << "||A*x_" << i*loop_params.residual_check_len << " - b||_infty = " << std::setprecision(16) << (*residuals_vec)[i] << std::endl;
+        std::cout << "||A*x_" << i*loop_params.residual_check_len << " - b||_infty = " << std::setprecision(16) << residuals_vec[i] << std::endl;
     }
 }
 
 void summary_output(
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    std::vector<double> *residuals_vec,
+    double *residuals_vec, // Here is the problem. Why would you send the entire residuals vec??
     std::string *solver_type,
     LoopParams loop_params,
     Flags flags,
@@ -239,7 +237,7 @@ void summary_output(
         std::cout << "\n" << *solver_type << " solver did not converge after " << loop_params.max_iters << " iterations." << std::endl;
     }
     std::cout << "The residual of the final iteration is: ||A*x_star - b||_infty = " <<
-    std::scientific << (*residuals_vec)[loop_params.residual_count] << ".\n";
+    std::scientific << residuals_vec[loop_params.residual_count] << ".\n";
     std::cout << "The stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
     std::cout << "The total elapsed time was: " << total_time_elapsed << "[s]." << std::endl;
     std::cout << "Out of which, the pre-processing time was: " << total_time_elapsed - calc_time_elapsed <<
@@ -251,12 +249,13 @@ void summary_output(
 }
 
 void iter_output(
-    std::vector<double> *x_approx,
+    const double *x_approx,
+    int N,
     int iter_count
 ){
     printf("On iter: %i, x appox is:\n", iter_count);
-    for(int i = 0; i < x_approx->size(); ++i){
-        printf("idx: %i, val: %f\n", i, (*x_approx)[i]);
+    for(int i = 0; i < N; ++i){
+        printf("idx: %i, val: %f\n", i, x_approx[i]);
     }
 }
 
@@ -290,28 +289,50 @@ void write_comparison_to_file(
 void postprocessing(
     argType *args
 ){
-    std::vector<double> *x_new = args->x_new;
-    std::vector<double> *x_star = args->x_star;
-    std::vector<double> *x_old = args->x_old;
-    std::vector<double> *tmp = args->tmp;
-    std::vector<double> *D = args->D;
-    std::vector<double> *r = args->r;
-    std::vector<double> *b = args->b;
-    std::vector<double> *normed_residuals = args->normed_residuals;
-    std::string solver_type = args->solver_type;
-    LoopParams *loop_params = args->loop_params;
-    const Flags *flags = args->flags;
-    double total_time_elapsed = args->total_time_elapsed;
-    double calc_time_elapsed = args->calc_time_elapsed;
-    SparseMtxFormat *sparse_mat = args->sparse_mat;
+    std::vector<double> *x_star;
+    // double *normed_residuals;
+
+#ifdef __CUDACC__
+// Something weird is going on in here
+    // printf("args->x_star[0] = %f\n", (*args->x_star)[0]);
+    // printf("args->x_star[1] = %f\n", (*args->x_star)[1]);
+    // printf("args->d_x_star[0] = %f\n", args->d_x_star[0]);
+    // printf("args->d_x_star[1] = %f\n", args->d_x_star[1]);
+    cudaMemcpy(args->x_star, args->d_x_star, args->vec_size*sizeof(double), cudaMemcpyDeviceToHost);
+    // printf("args->x_star[0] = %f\n", (*args->x_star)[0]);
+    // printf("args->x_star[1] = %f\n", (*args->x_star)[1]);
+    // printf("args->d_x_star[0] = %f\n", args->d_x_star[0]);
+    // printf("args->d_x_star[1] = %f\n", args->d_x_star[1]);
+
+    // printf("args->normed_residuals[0] = %f", args->normed_residuals[0]);
+    // printf("args->normed_residuals[1] = %f", args->normed_residuals[1]);
+    // // printf("args->d_normed_residuals[0] = %f", args->d_normed_residuals[0]);
+    // // printf("args->d_normed_residuals[1] = %f", args->d_normed_residuals[1]);
+    // cudaMemcpy(args->normed_residuals, args->d_normed_residuals, 1*sizeof(double), cudaMemcpyDeviceToHost);
+
+    // TODO: I GUESS! :(
+    // cudaMemcpy(args->normed_residuals, args->d_normed_residuals, (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double), cudaMemcpyDeviceToHost);
+    // printf("args->normed_residuals[0] = %f", args->normed_residuals[0]);
+    // printf("args->normed_residuals[1] = %f", args->normed_residuals[1]);
+    // // printf("args->d_normed_residuals[0] = %f", args->d_normed_residuals[0]);
+    // // printf("args->d_normed_residuals[1] = %f", args->d_normed_residuals[1]);
+    // // cudaDeviceSynchronize();
+#endif
+
+    // x_star = args->x_star;
+    // normed_residuals = args->normed_residuals;
+    // std::string solver_type = args->solver_type;
+    // LoopParams *loop_params = args->loop_params;
+    // double total_time_elapsed = args->total_time_elapsed;
+    // double calc_time_elapsed = args->calc_time_elapsed;
 
     // TODO: include SCS vs. CRS comparison for validation
     // if(flags.compare_direct){
     //     compare_with_direct(crs_mat, matrix_file_name, loop_params, x_star, (*normed_residuals)[loop_params.residual_count]);
     // }
 
-    if(flags->print_summary){
-        summary_output(x_star, b, normed_residuals, &solver_type, *loop_params, *flags, total_time_elapsed, calc_time_elapsed);
+    if(args->flags->print_summary){
+        summary_output(args->normed_residuals, &args->solver_type, *args->loop_params, *args->flags, args->total_time_elapsed, args->calc_time_elapsed);
     }
     
     //sufficent to just print to stdout for now

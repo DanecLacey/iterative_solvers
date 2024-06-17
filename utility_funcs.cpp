@@ -18,95 +18,56 @@
 #include "kernels.hpp"
 
 void generate_vector(
-    std::vector<double> *vec_to_populate,
+    double *vec_to_populate,
     int size,
     bool rand_flag,
-    std::vector<double> *values,
+    double *values,
     double initial_val
 ){
     if(rand_flag){
-        double upper_bound = *(std::max_element(std::begin(*values), std::end(*values)));
-        double lower_bound = *(std::min_element(std::begin(*values), std::end(*values)));
+        // TODO: Make proportional to matrix data
+        // double upper_bound = *(std::max_element(std::begin(*values), std::end(*values)));
+        // double lower_bound = *(std::min_element(std::begin(*values), std::end(*values)));
+        double upper_bound = 10;
+        double lower_bound = -10;
         srand(time(nullptr));
 
         double range = (upper_bound - lower_bound); 
         double div = RAND_MAX / range;
 
         for(int i = 0; i < size; ++i){
-            (*vec_to_populate)[i] = lower_bound + (rand() / div); //NOTE: expensive?
+            vec_to_populate[i] = lower_bound + (rand() / div); //NOTE: expensive?
         }
     }
     else{
         for(int i = 0; i < size; ++i){
-            (*vec_to_populate)[i] = initial_val;
+            vec_to_populate[i] = initial_val;
         }
     }
 
 }
 
-double infty_vec_norm(
-    const std::vector<double> *vec
-){
-    double max_abs = 0.;
-    double curr_abs;
-    for (int i = 0; i < vec->size(); ++i){
-        curr_abs = std::abs((*vec)[i]);
-        if ( curr_abs > max_abs){
-            max_abs = curr_abs; 
-        }
-    }
+// TODO: use case for making this device resident? Or using it at all?
+// double infty_mat_norm(
+//     const CRSMtxData *crs_mat
+// ){
+//     // Accumulate with sum all the elements in each row
+//     std::vector<double> row_sums(crs_mat->n_rows, 0.0);
 
-    return max_abs;
-}
+//     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx)
+//         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+// #ifdef DEBUG_MODE
+//             std::cout << "summing: " << crs_mat->val[nz_idx] << " in infty mat norm" << std::endl;
+// #endif
+//             // row_sums[row_idx] += abs(crs_mat->val[nz_idx]); 
+//             row_sums[row_idx] += crs_mat->val[nz_idx]; 
 
-double infty_mat_norm(
-    const CRSMtxData *crs_mat
-){
-    // Accumulate with sum all the elements in each row
-    std::vector<double> row_sums(crs_mat->n_rows, 0.0);
+//         }
 
-    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx)
-        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-#ifdef DEBUG_MODE
-            std::cout << "summing: " << crs_mat->val[nz_idx] << " in infty mat norm" << std::endl;
-#endif
-            // row_sums[row_idx] += abs(crs_mat->val[nz_idx]); 
-            row_sums[row_idx] += crs_mat->val[nz_idx]; 
+//     // The largest sum is the matrix infty norm
+//     return infty_vec_norm_cpu(&row_sums);
+// }
 
-        }
-
-    // The largest sum is the matrix infty norm
-    return infty_vec_norm(&row_sums);
-}
-
-/* Residual here is the distance from A*x_new to b, where the norm
- is the infinity norm: ||A*x_new-b||_infty */
-void calc_residual(
-    SparseMtxFormat *sparse_mat,
-    std::vector<double> *x,
-    std::vector<double> *b,
-    std::vector<double> *r,
-    std::vector<double> *tmp
-){
-    //Unpack args 
-    #pragma omp parallel
-    {
-#ifdef USE_USPMV
-        spmv_omp_scs<double, int>(
-            sparse_mat->scs_mat->C, // C
-            sparse_mat->scs_mat->n_chunks,
-            &(sparse_mat->scs_mat->chunk_ptrs)[0],
-            &(sparse_mat->scs_mat->chunk_lengths)[0],
-            &(sparse_mat->scs_mat->col_idxs)[0],
-            &(sparse_mat->scs_mat->values)[0],
-            &(*x)[0],
-            &(*tmp)[0]);
-#else
-        spmv_crs(tmp, sparse_mat->crs_mat, x);
-#endif
-        subtract_vectors(r, b, tmp);
-    }
-}
 
 void start_time(
     timeval *begin
@@ -163,12 +124,12 @@ void gen_neg_inv(
 
 void extract_diag(
     const COOMtxData *coo_mat,
-    std::vector<double> *diag
+    double *diag
 ){
     #pragma omp parallel for schedule (static)
     for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
         if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
-            (*diag)[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
+            diag[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
         }
     }
 }
@@ -360,6 +321,7 @@ void preprocessing(
         split_L_U(args->coo_mat, coo_L, coo_U);
 
 #ifdef USE_USPMV
+        // Only used for GS kernel
         // TODO: Find a better solution than this crap
         MtxData<double, int> *mtx_L = new MtxData<double, int>;
         mtx_L->n_rows = coo_L->n_rows;
@@ -408,52 +370,99 @@ void preprocessing(
 #else
     args->vec_size = args->coo_mat->n_cols;
 #endif
-    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
 
-    // Resize all working arrays, now we know the right size
-    args->x_star->resize(args->vec_size, 0);
-    args->x_new->resize(args->vec_size, 0);
-    args->x_old->resize(args->vec_size, 0);
-    args->tmp->resize(args->vec_size, 0);
-    args->D->resize(args->vec_size, 0);
-    args->r->resize(args->vec_size, 0);
-    args->b->resize(args->vec_size, 0);
+    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
+    
+#ifdef __CUDACC__
+    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
+    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
+    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
+    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
+#endif
+
+    // Resize all working arrays, now that we know the right size
+    // std::vector<double> x_star;
+    // x_star->resize(args->vec_size, 0.0);
+
+    // std::copy(args->x_star.begin(), args->x_star.end(), test_array_x_star);
+
+
+    // args->x_new->resize(args->vec_size, 0.0);
+    // args->x_old->resize(args->vec_size, 0.0);
+    // args->tmp->resize(args->vec_size, 0.0);
+    // args->D->resize(args->vec_size, 0.0);
+    // args->r->resize(args->vec_size, 0.0);
+    // args->b->resize(args->vec_size, 0.0);
 
     extract_diag(args->coo_mat, args->D);
 
     // Make b vector
-    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_b);
+    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
+    // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
-    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_x);
+    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
 
-// TODO: symmetric permutations!
 #ifdef USE_USPMV
     // Need to permute these vectors in accordance with SIGMA if using USpMV library
-    std::vector<double> D_perm(args->vec_size, 0);
-    apply_permutation(&(D_perm)[0], &(*args->D)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    std::swap(D_perm, (*args->D));
+    double *D_perm = new double [args->vec_size];
+    apply_permutation(D_perm, args->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(D_perm, args->D);
 
-    std::vector<double> b_perm(args->vec_size, 0);
-    apply_permutation(&(b_perm)[0], &(*args->b)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    std::swap(b_perm, (*args->b));
+    double *b_perm = new double [args->vec_size];
+    apply_permutation(b_perm, args->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(b_perm, args->b);
 
     // NOTE: Permuted w.r.t. columns due to symmetric permutation
-    std::vector<double> x_old_perm(args->vec_size, 0);
-    apply_permutation(&(x_old_perm)[0], &(*args->x_old)[0], &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
-    std::swap(x_old_perm, *(args->x_old));
+    double *x_old_perm = new double[args->vec_size];
+    apply_permutation(x_old_perm, args->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
+    // std::swap(x_old_perm, args->x_old);
+
+    // Deep copy, so you can free memory
+    // TODO: wrap in func
+    for(int i = 0; i < args->vec_size; ++i){
+        args->D[i] = D_perm[i];
+        args->b[i] = b_perm[i];
+        args->x_old[i] = x_old_perm[i];
+    }
+
+    delete D_perm;
+    delete b_perm;
+    delete x_old_perm;
+#endif
+
+#ifdef __CUDACC__
+    // NOTE: Really only need to copy x_old, D, and b data, as all other host vectors are just zero at this point?
+    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
 #endif
 
     // Precalculate stopping criteria
-    calc_residual(args->sparse_mat, args->x_old, args->b, args->r, args->tmp);
+    // Easier to just do on the host for now
+    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->vec_size);
 
 #ifdef DEBUG_MODE
-    printf("[");
-    for(int i = 0; i < args->r->size(); ++i){
-        std::cout << (*args->r)[i] << ",";
+    printf("initial residual = [");
+    for(int i = 0; i < args->vec_size; ++i){
+        std::cout << args->r[i] << ",";
     }
     printf("]\n");
 #endif
 
-    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm(args->r); 
+    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r, args->vec_size); 
+
+// #ifdef __CUDACC__
+//     // The first residual is computed on the host, and given to the device
+//     // Easier to just do on the host for now, and give stopping criteria to device
+//     cudaMalloc(&(args->loop_params->d_stopping_criteria), sizeof(double));
+//     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
+// #endif
+
 }

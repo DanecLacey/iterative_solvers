@@ -373,14 +373,14 @@ struct SparseMtxFormat{
 struct argType {
     COOMtxData *coo_mat;
     SparseMtxFormat *sparse_mat;
-    std::vector<double> *x_star;
-    std::vector<double> *x_new;
-    std::vector<double> *x_old;
-    std::vector<double> *tmp;
-    std::vector<double> *D;
-    std::vector<double> *r;
-    std::vector<double> *b;
-    std::vector<double> *normed_residuals;
+    double *x_star;
+    double *x_new;
+    double *x_old;
+    double *tmp;
+    double *D;
+    double *r;
+    double *b;
+    double *normed_residuals;
     LoopParams *loop_params;
     std::string solver_type;
     Flags *flags;
@@ -388,5 +388,18 @@ struct argType {
     double calc_time_elapsed;
     double total_time_elapsed;
     int vec_size;
+#ifdef __CUDACC__
+    double *d_x_star; 
+    double *d_x_new;
+    double *d_x_old;
+    int *d_row_ptr;
+    int *d_col;
+    double *d_val; 
+    double *d_tmp;
+    double *d_r;
+    double *d_D;
+    double *d_b;
+    double *d_normed_residuals;
+#endif
 };
 #endif /*STRUCTS_H*/

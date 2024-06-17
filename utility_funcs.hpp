@@ -16,14 +16,6 @@ void generate_vector(
     double initial_val
 );
 
-double calc_residual(
-    SparseMtxFormat *sparse_mat,
-    std::vector<double> *x,
-    std::vector<double> *b,
-    std::vector<double> *r,
-    std::vector<double> *tmp
-);
-
 void start_time(
     timeval *begin
 );
@@ -33,13 +25,11 @@ double end_time(
     timeval *end
 );
 
-double infty_vec_norm(
-    const std::vector<double> *vec
-);
 
-double infty_mat_norm(
-    const CRSMtxData *crs_mat
-);
+// Do you need this anywhere??
+// double infty_mat_norm(
+//     const CRSMtxData *crs_mat
+// );
 
 void gen_neg_inv(
     std::vector<double> *neg_inv_coo_vec,

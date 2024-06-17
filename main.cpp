@@ -53,7 +53,7 @@ int main(int argc, char *argv[]){
         false, // print_iters. WARNING: costly
         true, // print_summary
         true, // print_residuals
-        true, // convergence_flag. TODO: really shouldn't be here
+        false, // convergence_flag. TODO: really shouldn't be here
         false, // apply preconditioner TODO: not implemented
         false, // Compare to SparseLU direct solver
         false // generate random data for b and initial x vectors
@@ -63,7 +63,7 @@ int main(int argc, char *argv[]){
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
-        1, // calculate residual every n iterations
+        50, // calculate residual every n iterations
         3000, // maximum iteration count
         0.0, // init stopping criteria
         1e-14, // tolerance to stop iterations
@@ -73,29 +73,67 @@ int main(int argc, char *argv[]){
 
     argType *args = new argType;
     SparseMtxFormat *sparse_mat = new SparseMtxFormat;
-    std::vector<double> x_star; 
-    std::vector<double> x_new;
-    std::vector<double> x_old;
-    std::vector<double> tmp;
-    std::vector<double> D;
-    std::vector<double> r; 
-    std::vector<double> b;
-    std::vector<double> normed_residuals(loop_params.max_iters / loop_params.residual_check_len + 1);
+
+    args->vec_size = coo_mat->n_cols;
+    double *x_star = new double[args->vec_size];
+    double *x_old = new double[args->vec_size];
+    double *x_new = new double[args->vec_size];
+    double *tmp = new double[args->vec_size];
+    double *D = new double[args->vec_size];
+    double *r = new double[args->vec_size];
+    double *b = new double[args->vec_size];
+    double *normed_residuals = new double[loop_params.max_iters / loop_params.residual_check_len + 1];
     
     args->coo_mat = coo_mat;
-    args->x_star = &x_star;
-    args->x_new = &x_new;
-    args->x_old = &x_old;
-    args->tmp = &tmp;
-    args->D = &D;
-    args->r = &r;
-    args->b = &b;
-    args->normed_residuals = &normed_residuals;
+    args->x_star = x_star;
+    args->x_old = x_old;
+    args->x_new = x_new;
+    args->tmp = tmp;
+    args->D = D;
+    args->r = r;
+    args->b = b;
+    args->normed_residuals = normed_residuals;
     args->loop_params = &loop_params;
     args->solver_type = solver_type;
     args->flags = &flags;
     args->matrix_file_name = &matrix_file_name;
     args->sparse_mat = sparse_mat;
+
+#ifdef __CUDACC__
+    // Just give pointers to args struct now, allocate on device later
+    double *d_x_star;
+    double *d_x_new;
+    double *d_x_old;
+    int *d_row_ptr;
+    int *d_col;
+    double *d_val;
+    double *d_tmp;
+    double *d_r;
+    double *d_D;
+    double *d_b;
+    double *d_normed_residuals;
+
+    args->d_x_star = d_x_star;
+    args->d_x_new = d_x_new;
+    args->d_x_old = d_x_old;
+    args->d_row_ptr = d_row_ptr;
+    args->d_col = d_col;
+    args->d_val = d_val;
+    args->d_tmp = d_tmp;
+    args->d_r = d_r;
+    args->d_D = d_D;
+    args->d_b = d_b;
+    args->d_normed_residuals = d_normed_residuals;
+
+    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
+#endif
 
 #ifdef USE_USPMV
     ScsData<double, int> *scs_mat = new ScsData<double, int>;
@@ -133,6 +171,28 @@ int main(int argc, char *argv[]){
     delete coo_mat;
     delete sparse_mat;
     delete args;
+    delete normed_residuals;
+    delete x_star;
+    delete x_old;
+    delete x_new;
+    delete tmp;
+    delete D;
+    delete r;
+    delete b;
+
+#ifdef __CUDACC__
+    cudaFree(args->d_x_star);
+    cudaFree(args->d_x_new);
+    cudaFree(args->d_x_old);
+    cudaFree(args->d_row_ptr);
+    cudaFree(args->d_col);
+    cudaFree(args->d_val);
+    cudaFree(args->d_tmp);
+    cudaFree(args->d_r);
+    cudaFree(args->d_D);
+    cudaFree(args->d_b);
+    cudaFree(args->d_normed_residuals);
+#endif
 
     return 0;
 }

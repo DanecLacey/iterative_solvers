@@ -65,27 +65,46 @@ void sum_vectors(
     }
 }
 
-void subtract_vectors(
-    std::vector<double> *result_vec,
-    const std::vector<double> *vec1,
-    const std::vector<double> *vec2
+void subtract_vectors_cpu(
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N
 ){
-#ifdef DEBUG_MODE
-    if(vec1->size() != vec2->size()){
-        printf("ERROR: sum_vectors: mismatch in vector sizes.\n");
-        exit(1);
-    }
-    if(vec1->size() == 0){
-        printf("ERROR: sum_vectors: zero size vectors.\n");
-        exit(1);
-    }
-#endif
     // Orphaned directive: Assumed already called within a parallel region
     #pragma omp for
-    for (int i=0; i<vec1->size(); i++){
-        (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
+    for (int i = 0; i < N; ++i){
+        result_vec[i] = vec1[i] - vec2[i];
     }
 }
+
+#ifdef __CUDACC__
+__global__
+void subtract_vectors_gpu(
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N
+){
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
+
+    while(thread_idx + offset < N){
+        row_idx = thread_idx + offset;
+        result_vec[row_idx] = vec1[row_idx] - vec2[row_idx];
+
+// #ifdef DEBUG_MODE_FINE
+        printf("%f = %f - %f at index %i\n", result_vec[row_idx], vec1[row_idx], vec2[row_idx], row_idx); 
+// #endif
+
+        offset += stride;
+    }
+}
+#endif
 
 void sum_matrices(
     COOMtxData *sum_mtx,
@@ -208,10 +227,10 @@ void sum_matrices(
 
 }
 
-void spmv_crs(
-    std::vector<double> *y,
+void spmv_crs_cpu(
+    double *y,
     const CRSMtxData *crs_mat,
-    const std::vector<double> *x
+    double *x
     )
 {
     double tmp;
@@ -221,20 +240,60 @@ void spmv_crs(
     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
         tmp = 0.0;
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-            tmp += crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]];
-#ifdef DEBUG_MODE
-            std::cout << crs_mat->val[nz_idx] << " * " << (*x)[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+            tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
+#ifdef DEBUG_MODE_FINE
+            std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
 #endif
         }
-        (*y)[row_idx] = tmp;
+        y[row_idx] = tmp;
     }
 }
 
-void jacobi_normalize_x(
-    std::vector<double> *x_new,
-    const std::vector<double> *x_old,
-    const std::vector<double> *D,
-    const std::vector<double> *b,
+// TODO: Take from USpMV library later?
+#ifdef __CUDACC__
+__global__
+void spmv_crs_gpu(
+    const int d_n_rows,
+    const int *d_row_ptr,
+    const int *d_col,
+    const double *d_val,
+    const double *d_x,
+    double *d_y
+    )
+{
+    // Idea is for each thread to be responsible for one row
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
+
+    while(thread_idx + offset < d_n_rows){
+        double tmp = 0.0;
+        row_idx = thread_idx + offset;
+
+        for(int nz_idx = d_row_ptr[row_idx]; nz_idx < d_row_ptr[row_idx+1]; ++nz_idx){
+            tmp += d_val[nz_idx] * d_x[d_col[nz_idx]];
+        }
+
+        d_y[row_idx] = tmp;
+
+        // printf("tmp[%i]: %f\n", row_idx, tmp);
+
+        offset += stride;
+    }
+
+    // TODO: When is this necessary?
+    // __synchthreads();
+}
+#endif
+
+void jacobi_normalize_x_cpu(
+    double *x_new,
+    const double *x_old,
+    const double *D,
+    const double *b,
     int n_rows
 ){
     double adjusted_x;
@@ -242,19 +301,45 @@ void jacobi_normalize_x(
     // Orphaned directive: Assumed already called within a parallel region
     #pragma omp for schedule (static)
     for(int row_idx = 0; row_idx < n_rows; ++row_idx){
-        adjusted_x = (*x_new)[row_idx] - (*D)[row_idx] * (*x_old)[row_idx];
-        (*x_new)[row_idx] = ((*b)[row_idx] - adjusted_x)/ (*D)[row_idx];
-#ifdef DEBUG_MODE
-            std::cout << (*b)[row_idx] << " - " << adjusted_x << " / " << (*D)[row_idx] << " = " << (*x_new)[row_idx] << " at idx: " << row_idx << std::endl; 
+        adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
+        x_new[row_idx] = (b[row_idx] - adjusted_x)/ D[row_idx];
+#ifdef DEBUG_MODE_FINE
+            std::cout << b[row_idx] << " - " << adjusted_x << " / " << D[row_idx] << " = " << x_new[row_idx] << " at idx: " << row_idx << std::endl; 
 #endif
     }
 }
 
+#ifdef __CUDACC__
+__global__
+void jacobi_normalize_x_gpu(
+    double *d_x_new,
+    const double *d_x_old,
+    const double *d_D,
+    const double *d_b,
+    int n_rows
+){
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
+
+    while(thread_idx + offset < n_rows){
+        row_idx = thread_idx + offset;
+        double adjusted_x = d_x_new[row_idx] - d_D[row_idx] * d_x_old[row_idx];
+        d_x_new[row_idx] = (d_b[row_idx] - adjusted_x) / d_D[row_idx];
+
+        offset += stride;
+    }
+}
+#endif
+
 void spltsv_crs(
     const CRSMtxData *crs_L,
-    std::vector<double> *x,
-    const std::vector<double> *D,
-    const std::vector<double> *b_Ux
+    double *x,
+    const double *D,
+    const double *b_Ux
 )
 {
     double sum;
@@ -262,11 +347,167 @@ void spltsv_crs(
     for(int row_idx = 0; row_idx < crs_L->n_rows; ++row_idx){
         sum = 0.0;
         for(int nz_idx = crs_L->row_ptr[row_idx]; nz_idx < crs_L->row_ptr[row_idx+1]; ++nz_idx){
-            sum += crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]];
-#ifdef DEBUG_MODE
-            std::cout << crs_L->val[nz_idx] << " * " << (*x)[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+            sum += crs_L->val[nz_idx] * x[crs_L->col[nz_idx]];
+#ifdef DEBUG_MODE_FINE
+            std::cout << crs_L->val[nz_idx] << " * " << x[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * x[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
 #endif
         }
-        (*x)[row_idx] = ((*b_Ux)[row_idx] - sum)/(*D)[row_idx];
+        x[row_idx] = (b_Ux[row_idx] - sum)/D[row_idx];
     }
 }
+
+double infty_vec_norm_cpu(
+    const double *vec,
+    int N
+){
+    double max_abs = 0.;
+    double curr_abs;
+    for (int i = 0; i < N; ++i){
+        curr_abs = std::abs(vec[i]);
+        if ( curr_abs > max_abs){
+            max_abs = curr_abs; 
+        }
+    }
+
+    return max_abs;
+}
+
+#ifdef __CUDACC__
+// Begin with all threads unlocked
+__device__ int mutex = 0;
+
+__device__ void acquire_semaphore(int *mutex){
+    while(atomicCAS(mutex, 0, 1) == 1);
+}
+
+__device__ void release_semaphore(int *mutex){
+    *mutex = 0;
+    __threadfence();
+}
+
+__global__
+void infty_vec_norm_gpu(
+    const double *d_vec,
+    double *d_infty_norm,
+    double n_rows
+){
+    const unsigned int thread_idx_in_block = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * blockDim.x;
+    const unsigned int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    
+
+    // if(thread_idx + offset < n_rows){
+
+        // Shared memory region, same size as block
+        // Will be present on each block
+        extern __shared__ double shared_mem[];
+        __syncthreads();
+        
+        for (int i = threadIdx.x; i < THREADS_PER_BLOCK; i += blockDim.x)
+            shared_mem[i] = 0.0;
+        __syncthreads();
+
+        double tmp = 0.0;
+        while(thread_idx + offset < n_rows){
+            // NOTE: Absolute values are taken here, and don't need to be done
+            // again for comparing block maxes
+            tmp = max(abs(tmp), abs(d_vec[thread_idx + offset]));
+
+            offset += stride;
+        }
+
+        shared_mem[threadIdx.x] = tmp;
+
+        __syncthreads();
+
+        // Reduction per block
+        unsigned int i = blockDim.x/2;
+        while(i != 0){
+            if(threadIdx.x < i){
+                shared_mem[threadIdx.x] = max(abs(shared_mem[threadIdx.x]), abs(shared_mem[threadIdx.x + i]));
+            }
+            __syncthreads();
+            i /= 2;
+        } 
+
+        // Begin locks
+        __syncthreads();
+        if(threadIdx.x == 0){
+              acquire_semaphore(&mutex);
+        }
+
+        __syncthreads();
+
+        // Critical section
+        if(threadIdx.x == 0){
+            *d_infty_norm = (*d_infty_norm > shared_mem[0]) ? *d_infty_norm : shared_mem[0];
+            printf("%f >? %f\n", *d_infty_norm, shared_mem[0]);
+        }
+
+        __threadfence();
+        __syncthreads();
+
+        if (threadIdx.x == 0){
+            release_semaphore(&mutex);
+        }
+
+        __syncthreads();
+        // End locks
+
+    printf("d_residual_norm = %f\n", *d_infty_norm);
+    // }
+    
+}
+#endif
+
+/* Residual here is the distance from A*x_new to b, where the norm
+ is the infinity norm: ||A*x_new-b||_infty */
+void calc_residual_cpu(
+    SparseMtxFormat *sparse_mat,
+    double *x,
+    double *b,
+    double *r,
+    double *tmp,
+    int N
+){
+    //Unpack args 
+    #pragma omp parallel
+    {
+#ifdef USE_USPMV
+        uspmv_omp_scs_cpu<double, int>(
+            sparse_mat->scs_mat->C,
+            sparse_mat->scs_mat->n_chunks,
+            &(sparse_mat->scs_mat->chunk_ptrs)[0],
+            &(sparse_mat->scs_mat->chunk_lengths)[0],
+            &(sparse_mat->scs_mat->col_idxs)[0],
+            &(sparse_mat->scs_mat->values)[0],
+            x,
+            tmp);
+#else
+        spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
+#endif
+        subtract_vectors_cpu(r, b, tmp, N);
+    }
+}
+
+#ifdef __CUDACC__
+void calc_residual_gpu(
+    int *d_row_ptr,
+    int *d_col,
+    double *d_val,
+    double *d_x,
+    double *d_b,
+    double *d_r,
+    double *d_tmp,
+    int d_n_rows
+){
+    // TODO: SCS
+
+    // TODO: Block and thread count?
+    spmv_crs_gpu<<<BLOCKS_PER_GRID,THREADS_PER_BLOCK>>>(d_n_rows, d_row_ptr, d_col, d_val, d_x, d_tmp);
+
+    subtract_vectors_gpu<<<BLOCKS_PER_GRID,THREADS_PER_BLOCK>>>(d_r, d_b, d_tmp, d_n_rows);
+}
+#endif

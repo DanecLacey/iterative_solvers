@@ -16,10 +16,7 @@ void read_mtx(
 );
 
 void summary_output(
-    COOMtxData *coo_mat,
-    std::vector<double> *x_star,
-    std::vector<double> *b,
-    std::vector<double> *residuals_vec,
+    double *residuals_vec,
     std::string *solver_type,
     LoopParams loop_params,
     Flags flags,
@@ -28,14 +25,15 @@ void summary_output(
 );
 
 void iter_output(
-    std::vector<double> *x_approx,
+    const double *x_approx,
+    int N,
     int iter_count
 );
 
 void residuals_output(
     bool print_residuals,
-    std::vector<double> *residuals_vec,
-    int iter_count
+    double* residuals_vec,
+    LoopParams loop_params
 );
 
 void write_residuals_to_file(std::vector<double> *residuals_vec);
