@@ -18,27 +18,30 @@
 #include "kernels.hpp"
 
 void generate_vector(
-    std::vector<double> *vec_to_populate,
+    double *vec_to_populate,
     int size,
     bool rand_flag,
-    std::vector<double> *values,
+    double *values,
     double initial_val
 ){
     if(rand_flag){
-        double upper_bound = *(std::max_element(std::begin(*values), std::end(*values)));
-        double lower_bound = *(std::min_element(std::begin(*values), std::end(*values)));
+        // TODO: Make proportional to matrix data
+        // double upper_bound = *(std::max_element(std::begin(*values), std::end(*values)));
+        // double lower_bound = *(std::min_element(std::begin(*values), std::end(*values)));
+        double upper_bound = 10;
+        double lower_bound = -10;
         srand(time(nullptr));
 
         double range = (upper_bound - lower_bound); 
         double div = RAND_MAX / range;
 
         for(int i = 0; i < size; ++i){
-            (*vec_to_populate)[i] = lower_bound + (rand() / div); //NOTE: expensive?
+            vec_to_populate[i] = lower_bound + (rand() / div); //NOTE: expensive?
         }
     }
     else{
         for(int i = 0; i < size; ++i){
-            (*vec_to_populate)[i] = initial_val;
+            vec_to_populate[i] = initial_val;
         }
     }
 
@@ -121,12 +124,12 @@ void gen_neg_inv(
 
 void extract_diag(
     const COOMtxData *coo_mat,
-    std::vector<double> *diag
+    double *diag
 ){
     #pragma omp parallel for schedule (static)
     for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
         if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
-            (*diag)[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
+            diag[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
         }
     }
 }
@@ -373,92 +376,96 @@ void preprocessing(
     convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
     
 #ifdef __CUDACC__
-    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->n_rows+1)*sizeof(int));
-    cudaMalloc(&(args->d_col), (args->sparse_mat->nnz)*sizeof(int));
-    cudaMalloc(&(args->d_val), (args->sparse_mat->nnz)*sizeof(double));
-    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->row_ptr)[0], (args->sparse_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_col, &(args->sparse_mat->col)[0], (args->sparse_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_val, &(args->sparse_mat->val)[0], (args->sparse_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
+    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
+    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
+    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
 #endif
 
-    // Resize all working arrays, now we know the right size
-    args->x_star->resize(args->vec_size, 0.0);
-    args->x_new->resize(args->vec_size, 0.0);
-    args->x_old->resize(args->vec_size, 0.0);
-    args->tmp->resize(args->vec_size, 0.0);
-    args->D->resize(args->vec_size, 0.0);
-    args->r->resize(args->vec_size, 0.0);
-    args->b->resize(args->vec_size, 0.0);
+    // Resize all working arrays, now that we know the right size
+    // std::vector<double> x_star;
+    // x_star->resize(args->vec_size, 0.0);
 
-#ifdef __CUDACC__
-    // TODO: Is this legal to do here, and free later?
-    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_normed_residuals), (loop_params.max_iters / loop_params.residual_check_len + 1)*sizeof(double));
-#endif
+    // std::copy(args->x_star.begin(), args->x_star.end(), test_array_x_star);
+
+
+    // args->x_new->resize(args->vec_size, 0.0);
+    // args->x_old->resize(args->vec_size, 0.0);
+    // args->tmp->resize(args->vec_size, 0.0);
+    // args->D->resize(args->vec_size, 0.0);
+    // args->r->resize(args->vec_size, 0.0);
+    // args->b->resize(args->vec_size, 0.0);
 
     extract_diag(args->coo_mat, args->D);
 
     // TODO: What are the ramifications of having x and b different scales than the data? And how to make the "same scale" as data?
     // Make b vector
-    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_b);
+    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
 
     // Make initial x vector
-    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values), args->loop_params->init_x);
+    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
 
 #ifdef USE_USPMV
     // Need to permute these vectors in accordance with SIGMA if using USpMV library
-    std::vector<double> D_perm(args->vec_size, 0);
-    apply_permutation(&(D_perm)[0], &(*args->D)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    std::swap(D_perm, (*args->D));
+    double *D_perm = new double [args->vec_size];
+    apply_permutation(D_perm, args->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(D_perm, args->D);
 
-    std::vector<double> b_perm(args->vec_size, 0);
-    apply_permutation(&(b_perm)[0], &(*args->b)[0], &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    std::swap(b_perm, (*args->b));
+    double *b_perm = new double [args->vec_size];
+    apply_permutation(b_perm, args->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(b_perm, args->b);
 
     // NOTE: Permuted w.r.t. columns due to symmetric permutation
-    std::vector<double> x_old_perm(args->vec_size, 0);
-    apply_permutation(&(x_old_perm)[0], &(*args->x_old)[0], &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
-    std::swap(x_old_perm, *(args->x_old));
+    double *x_old_perm = new double[args->vec_size];
+    apply_permutation(x_old_perm, args->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
+    // std::swap(x_old_perm, args->x_old);
+
+    // Deep copy, so you can free memory
+    // TODO: wrap in func
+    for(int i = 0; i < args->vec_size; ++i){
+        args->D[i] = D_perm[i];
+        args->b[i] = b_perm[i];
+        args->x_old[i] = x_old_perm[i];
+    }
+
+    delete D_perm;
+    delete b_perm;
+    delete x_old_perm;
 #endif
 
 #ifdef __CUDACC__
     // NOTE: Really only need to copy x_old, D, and b data, as all other host vectors are just zero at this point?
-    cudaMemcpy(args->d_x_star, &(args->x_star)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_new, &(args->x_new)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_old, &(args->x_old)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_tmp, &(args->tmp)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_D, &(args->D)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_r, &(args->r)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_b, &(args->b)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
 #endif
 
     // Precalculate stopping criteria
     // Easier to just do on the host for now
-    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp);
+    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->vec_size);
 
 #ifdef DEBUG_MODE
     printf("initial residual = [");
-    for(int i = 0; i < args->r->size(); ++i){
-        std::cout << (*args->r)[i] << ",";
+    for(int i = 0; i < args->vec_size; ++i){
+        std::cout << args->r[i] << ",";
     }
     printf("]\n");
 #endif
 
-#ifndef __CUDACC__
-    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r); 
-#else
-    // The first residual is computed on the host, and given to the device
-    // Easier to just do on the host for now, and give stopping criteria to device
-    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r); 
-    cudaMalloc(&(args->loop_params->d_stopping_criteria), sizeof(double));
-    cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria)[0], args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r, args->vec_size); 
 
-#endif
+// #ifdef __CUDACC__
+//     // The first residual is computed on the host, and given to the device
+//     // Easier to just do on the host for now, and give stopping criteria to device
+//     cudaMalloc(&(args->loop_params->d_stopping_criteria), sizeof(double));
+//     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
+// #endif
+
 }

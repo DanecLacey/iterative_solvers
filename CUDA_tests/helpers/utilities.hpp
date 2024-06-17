@@ -3,6 +3,25 @@
 
 #include "structs.hpp"
 
+using ST=long;
+
+// template <typename VT, typename IT>
+void convert_to_scs(
+    COOMtxData *local_mtx,
+    ST C,
+    ST sigma,
+    SCSMtxData<double, int> *scs,
+    int *work_sharing_arr = nullptr,
+    int my_rank = 0
+);
+
+void apply_permutation(
+    double *permuted_vec,
+    double *vec_to_permute,
+    int *perm,
+    int num_elems_to_permute
+);
+
 void compare_with_mkl(
     const double *y,
     const double *mkl_result,

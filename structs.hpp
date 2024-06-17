@@ -33,9 +33,6 @@ struct LoopParams
     double tol;
     double init_b;
     double init_x;
-#ifdef __CUDACC__
-    double d_stopping_criteria;
-#endif
 };
 
 struct CRSMtxData
@@ -376,14 +373,14 @@ struct SparseMtxFormat{
 struct argType {
     COOMtxData *coo_mat;
     SparseMtxFormat *sparse_mat;
-    std::vector<double> *x_star;
-    std::vector<double> *x_new;
-    std::vector<double> *x_old;
-    std::vector<double> *tmp;
-    std::vector<double> *D;
-    std::vector<double> *r;
-    std::vector<double> *b;
-    std::vector<double> *normed_residuals;
+    double *x_star;
+    double *x_new;
+    double *x_old;
+    double *tmp;
+    double *D;
+    double *r;
+    double *b;
+    double *normed_residuals;
     LoopParams *loop_params;
     std::string solver_type;
     Flags *flags;
@@ -398,6 +395,11 @@ struct argType {
     int *d_row_ptr;
     int *d_col;
     double *d_val; 
+    double *d_tmp;
+    double *d_r;
+    double *d_D;
+    double *d_b;
+    double *d_normed_residuals;
 #endif
 };
 #endif /*STRUCTS_H*/

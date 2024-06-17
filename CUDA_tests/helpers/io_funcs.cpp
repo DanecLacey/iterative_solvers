@@ -76,8 +76,10 @@ void read_mtx(
     }
     if(nrows != ncols)
     {
-        printf("Matrix not square. Currently only square matrices are supported\n");
-        exit(1);
+        printf("WARNING: Matrix not square\n");
+
+        // printf("Matrix not square. Currently only square matrices are supported\n");
+        // exit(1);
     }
 
     //If matrix market file is symmetric; create a general one out of it

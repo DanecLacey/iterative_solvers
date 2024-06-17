@@ -2,6 +2,7 @@
 COMPILER=nvcc
 
 # Only applicable for gpu builds
+# Options: a40, a100
 GPGPU_ARCH=a40
 THREADS_PER_BLOCK=32
 BLOCKS_PER_GRID=256
@@ -14,8 +15,9 @@ USE_EIGEN = 0
 USE_GPROF = 0
 
 USE_USPMV = 0
-CHUNK_SIZE = 8
+CHUNK_SIZE = 1
 SIGMA = 1
+VECTOR_LENGTH = 4 # Assuming AVX instructions
 
 # TODO
 # USE_METIS = 1
@@ -35,6 +37,9 @@ ifeq ($(COMPILER),icc)
   OPT_LEVEL = -Ofast
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+ifeq ($(DEBUG_MODE),1)
+  DEBUGFLAGS += -g -DDEBUG_MODE
+endif
 endif
 
 ifeq ($(COMPILER),icx)
@@ -52,26 +57,33 @@ ifeq ($(COMPILER),nvcc)
   OPT_LEVEL = -O3
   OPT_HOST_ARCH  = #-tp=native how to optimizer host code for particular arch?
   OPT_DEVICE_ARCH  = -gencode arch=compute_86,code=sm_86 # Assuming A40 card
-  HOST_COMPILER_FLAGS= -Xcompiler -Wall 
+  HOST_COMPILER_FLAGS= #-Xcompiler -Wall 
 
   CXXFLAGS += $(OPT_LEVEL) $(HOST_COMPILER_FLAGS) $(OPT_HOST_ARCH) $(OPT_DEVICE_ARCH)
 
 ifeq ($(GPGPU_ARCH),a40)
 	GPGPU_ARCH_FLAGS = -gencode arch=compute_86,code=sm_86 -Xcompiler -fopenmp
 endif
+
+ifeq ($(GPGPU_ARCH),a100)
+	GPGPU_ARCH_FLAGS = -gencode arch=compute_80,code=sm_80 -Xcompiler -fopenmp
+endif
+
 endif
 
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
 endif
 
+ifeq ($(DEBUG_MODE_FINE),1)
+  DEBUGFLAGS += -g -DDEBUG_MODE -DDEBUG_MODE_FINE
+endif
+
+
 ifeq ($(USE_USPMV),1)
-  CHUNK_SIZE = 2
-  SIGMA = 2
-  VECTOR_LENGTH = 4 # Assuming AVX instructions
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
   ifeq ($(COMPILER),nvcc)
-    $(error CUDA with USpMV not yet supported)
+    $(warning CUDA with USpMV and C or SIGMA > 1 not yet supported)
   endif
 endif
 
@@ -104,7 +116,7 @@ endif
 
 iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
 ifeq ($(COMPILER),nvcc)
-	nvcc main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
+	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers_cpu
 endif
@@ -112,14 +124,14 @@ endif
 # main only depends on funcs, mmio, and structs header, not kernels
 main.o: main.cpp utility_funcs.hpp io_funcs.hpp
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c main.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o main.o
+	nvcc $(CXXFLAGS) -x cu -c main.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o main.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o
 endif
 	
 solvers.o: solvers.cpp solvers.hpp
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c solvers.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o solvers.o
+	nvcc $(CXXFLAGS) -x cu -c solvers.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o solvers.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c solvers.cpp -o solvers.o
 endif
@@ -127,7 +139,7 @@ endif
 # funcs depends on kernels
 utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c utility_funcs.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o utility_funcs.o
+	nvcc $(CXXFLAGS) -x cu -c utility_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o utility_funcs.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o
 endif
@@ -135,7 +147,7 @@ endif
 # funcs depends on kernels
 io_funcs.o: io_funcs.cpp io_funcs.hpp utility_funcs.hpp mmio.o
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c io_funcs.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o io_funcs.o
+	nvcc $(CXXFLAGS) -x cu -c io_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o io_funcs.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c io_funcs.cpp -o io_funcs.o
 endif
@@ -143,15 +155,15 @@ endif
 # only depends on "kernels" src and header, and structs header
 kernels.o: kernels.cpp kernels.hpp structs.hpp
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c kernels.cpp -o kernels.o
+	nvcc $(CXXFLAGS) -x cu -c kernels.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o kernels.o
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c kernels.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o kernels.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c kernels.cpp -o kernels.o
 endif
 
 # only depends on "mmio" src and header
 mmio.o: mmio.cpp mmio.h
 ifeq ($(COMPILER),nvcc)
-	nvcc -x cu -c mmio.cpp $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o mmio.o
+	nvcc $(CXXFLAGS) -x cu -c mmio.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o mmio.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c mmio.cpp -o mmio.o
   endif

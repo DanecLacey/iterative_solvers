@@ -23,7 +23,8 @@ void sum_vectors(
 );
 
 double infty_vec_norm_cpu(
-    const std::vector<double> *vec
+    const double *vec,
+    int N
 );
 
 #ifdef __CUDACC__
@@ -36,17 +37,19 @@ void infty_vec_norm_gpu(
 #endif
 
 void subtract_vectors_cpu(
-    std::vector<double> *result_vec,
-    const std::vector<double> *vec1,
-    const std::vector<double> *vec2
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N
 );
 
-// TODO: Do we also need to define __global__ in the header
 #ifdef __CUDACC__
+__global__
 void subtract_vectors_gpu(
     double *result_vec,
-    double *vec1,
-    double *vec2
+    const double *vec1,
+    const double *vec2,
+    int N
 );
 #endif
 
@@ -57,27 +60,28 @@ void sum_matrices(
 );
 
 void spmv_crs_cpu(
-    std::vector<double> *y,
+    double *y,
     const CRSMtxData *crs_mat,
-    const std::vector<double> *x
+    double *x
 );
 
 #ifdef __CUDACC__
+__global__
 void spmv_crs_gpu(
-    const double *val,
-    const int *col,
-    const int *row_ptr,
-    double *y,
-    const double *x,
-    const int n_rows
-);
+    const int d_n_rows,
+    const int *d_row_ptr,
+    const int *d_col,
+    const double *d_val,
+    const double *d_x,
+    double *d_y
+    );
 #endif
 
 void jacobi_normalize_x_cpu(
-    std::vector<double> *x_new,
-    const std::vector<double> *x_old,
-    const std::vector<double> *D,
-    const std::vector<double> *b,
+    double *x_new,
+    const double *x_old,
+    const double *D,
+    const double *b,
     int n_rows
 );
 
@@ -94,28 +98,28 @@ void jacobi_normalize_x_gpu(
 
 void spltsv_crs(
     const CRSMtxData *crs_L,
-    std::vector<double> *x,
-    const std::vector<double> *D,
-    const std::vector<double> *b_Ux
+    double *x,
+    const double *D,
+    const double *b_Ux
 );
 
 void calc_residual_cpu(
     SparseMtxFormat *sparse_mat,
-    std::vector<double> *x,
-    std::vector<double> *b,
-    std::vector<double> *r,
-    std::vector<double> *tmp
+    double *x,
+    double *b,
+    double *r,
+    double *tmp,
+    int N
 );
 
 #ifdef __CUDACC__
-__global__
 void calc_residual_gpu(
     int *d_row_ptr,
     int *d_col,
     double *d_val,
     double *d_x,
-    double *d_r,
     double *d_b,
+    double *d_r,
     double *d_tmp,
     int d_n_rows
 );

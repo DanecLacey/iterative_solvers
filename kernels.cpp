@@ -66,24 +66,15 @@ void sum_vectors(
 }
 
 void subtract_vectors_cpu(
-    std::vector<double> *result_vec,
-    const std::vector<double> *vec1,
-    const std::vector<double> *vec2
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N
 ){
-#ifdef DEBUG_MODE
-    if(vec1->size() != vec2->size()){
-        printf("ERROR: sum_vectors: mismatch in vector sizes.\n");
-        exit(1);
-    }
-    if(vec1->size() == 0){
-        printf("ERROR: sum_vectors: zero size vectors.\n");
-        exit(1);
-    }
-#endif
     // Orphaned directive: Assumed already called within a parallel region
     #pragma omp for
-    for (int i=0; i<vec1->size(); i++){
-        (*result_vec)[i] = (*vec1)[i] - (*vec2)[i];
+    for (int i = 0; i < N; ++i){
+        result_vec[i] = vec1[i] - vec2[i];
     }
 }
 
@@ -92,13 +83,26 @@ __global__
 void subtract_vectors_gpu(
     double *result_vec,
     const double *vec1,
-    const double *vec2
+    const double *vec2,
+    int N
 ){
     int thread_idx_in_block = threadIdx.x;
     int block_offset = blockIdx.x*blockDim.x;
-    int i = block_offset + thread_idx_in_block;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
 
-    if(i < N){(*result_vec)[i] = (*vec1)[i] - (*vec2)[i];}
+    while(thread_idx + offset < N){
+        row_idx = thread_idx + offset;
+        result_vec[row_idx] = vec1[row_idx] - vec2[row_idx];
+
+// #ifdef DEBUG_MODE_FINE
+        printf("%f = %f - %f at index %i\n", result_vec[row_idx], vec1[row_idx], vec2[row_idx], row_idx); 
+// #endif
+
+        offset += stride;
+    }
 }
 #endif
 
@@ -224,9 +228,9 @@ void sum_matrices(
 }
 
 void spmv_crs_cpu(
-    std::vector<double> *y,
+    double *y,
     const CRSMtxData *crs_mat,
-    const std::vector<double> *x
+    double *x
     )
 {
     double tmp;
@@ -236,12 +240,12 @@ void spmv_crs_cpu(
     for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
         tmp = 0.0;
         for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-            tmp += crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]];
-#ifdef DEBUG_MODE
-            std::cout << crs_mat->val[nz_idx] << " * " << (*x)[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * (*x)[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+            tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
+#ifdef DEBUG_MODE_FINE
+            std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
 #endif
         }
-        (*y)[row_idx] = tmp;
+        y[row_idx] = tmp;
     }
 }
 
@@ -249,27 +253,35 @@ void spmv_crs_cpu(
 #ifdef __CUDACC__
 __global__
 void spmv_crs_gpu(
-    const double *d_val,
-    const int *d_col,
+    const int d_n_rows,
     const int *d_row_ptr,
-    double *d_y,
+    const int *d_col,
+    const double *d_val,
     const double *d_x,
-    const int d_n_rows
+    double *d_y
     )
 {
     // Idea is for each thread to be responsible for one row
     int thread_idx_in_block = threadIdx.x;
     int block_offset = blockIdx.x*blockDim.x;
-    int i = block_offset + thread_idx_in_block;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
 
-    if(i < n_rows){
+    while(thread_idx + offset < d_n_rows){
         double tmp = 0.0;
+        row_idx = thread_idx + offset;
 
-        for(int nz_idx = d_row_ptr[i]; nz_idx < d_row_ptr[i+1]; ++nz_idx){
+        for(int nz_idx = d_row_ptr[row_idx]; nz_idx < d_row_ptr[row_idx+1]; ++nz_idx){
             tmp += d_val[nz_idx] * d_x[d_col[nz_idx]];
         }
 
-        d_y[i] = tmp;
+        d_y[row_idx] = tmp;
+
+        // printf("tmp[%i]: %f\n", row_idx, tmp);
+
+        offset += stride;
     }
 
     // TODO: When is this necessary?
@@ -278,10 +290,10 @@ void spmv_crs_gpu(
 #endif
 
 void jacobi_normalize_x_cpu(
-    std::vector<double> *x_new,
-    const std::vector<double> *x_old,
-    const std::vector<double> *D,
-    const std::vector<double> *b,
+    double *x_new,
+    const double *x_old,
+    const double *D,
+    const double *b,
     int n_rows
 ){
     double adjusted_x;
@@ -289,10 +301,10 @@ void jacobi_normalize_x_cpu(
     // Orphaned directive: Assumed already called within a parallel region
     #pragma omp for schedule (static)
     for(int row_idx = 0; row_idx < n_rows; ++row_idx){
-        adjusted_x = (*x_new)[row_idx] - (*D)[row_idx] * (*x_old)[row_idx];
-        (*x_new)[row_idx] = ((*b)[row_idx] - adjusted_x)/ (*D)[row_idx];
-#ifdef DEBUG_MODE
-            std::cout << (*b)[row_idx] << " - " << adjusted_x << " / " << (*D)[row_idx] << " = " << (*x_new)[row_idx] << " at idx: " << row_idx << std::endl; 
+        adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
+        x_new[row_idx] = (b[row_idx] - adjusted_x)/ D[row_idx];
+#ifdef DEBUG_MODE_FINE
+            std::cout << b[row_idx] << " - " << adjusted_x << " / " << D[row_idx] << " = " << x_new[row_idx] << " at idx: " << row_idx << std::endl; 
 #endif
     }
 }
@@ -308,20 +320,26 @@ void jacobi_normalize_x_gpu(
 ){
     int thread_idx_in_block = threadIdx.x;
     int block_offset = blockIdx.x*blockDim.x;
-    int i = block_offset + thread_idx_in_block;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
 
-    if(i < n_rows){
-        double adjusted_x = d_x_new[i] - d_D[i] * d_x_old[i];
-        d_x_new[i] = (d_b[i] - adjusted_x) / d_D[i];
+    while(thread_idx + offset < n_rows){
+        row_idx = thread_idx + offset;
+        double adjusted_x = d_x_new[row_idx] - d_D[row_idx] * d_x_old[row_idx];
+        d_x_new[row_idx] = (d_b[row_idx] - adjusted_x) / d_D[row_idx];
+
+        offset += stride;
     }
 }
 #endif
 
 void spltsv_crs(
     const CRSMtxData *crs_L,
-    std::vector<double> *x,
-    const std::vector<double> *D,
-    const std::vector<double> *b_Ux
+    double *x,
+    const double *D,
+    const double *b_Ux
 )
 {
     double sum;
@@ -329,22 +347,23 @@ void spltsv_crs(
     for(int row_idx = 0; row_idx < crs_L->n_rows; ++row_idx){
         sum = 0.0;
         for(int nz_idx = crs_L->row_ptr[row_idx]; nz_idx < crs_L->row_ptr[row_idx+1]; ++nz_idx){
-            sum += crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]];
-#ifdef DEBUG_MODE
-            std::cout << crs_L->val[nz_idx] << " * " << (*x)[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * (*x)[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+            sum += crs_L->val[nz_idx] * x[crs_L->col[nz_idx]];
+#ifdef DEBUG_MODE_FINE
+            std::cout << crs_L->val[nz_idx] << " * " << x[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * x[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
 #endif
         }
-        (*x)[row_idx] = ((*b_Ux)[row_idx] - sum)/(*D)[row_idx];
+        x[row_idx] = (b_Ux[row_idx] - sum)/D[row_idx];
     }
 }
 
 double infty_vec_norm_cpu(
-    const std::vector<double> *vec
+    const double *vec,
+    int N
 ){
     double max_abs = 0.;
     double curr_abs;
-    for (int i = 0; i < vec->size(); ++i){
-        curr_abs = std::abs((*vec)[i]);
+    for (int i = 0; i < N; ++i){
+        curr_abs = std::abs(vec[i]);
         if ( curr_abs > max_abs){
             max_abs = curr_abs; 
         }
@@ -379,15 +398,19 @@ void infty_vec_norm_gpu(
     unsigned int offset = 0;
     
 
-    // Is this necessary?
-    // if(thread_idx < N){
+    // if(thread_idx + offset < n_rows){
 
         // Shared memory region, same size as block
         // Will be present on each block
-        __shared__ double shared_mem[THREADS_PER_BLOCK];
+        extern __shared__ double shared_mem[];
+        __syncthreads();
+        
+        for (int i = threadIdx.x; i < THREADS_PER_BLOCK; i += blockDim.x)
+            shared_mem[i] = 0.0;
+        __syncthreads();
 
         double tmp = 0.0;
-        while(thread_idx + offset < N){
+        while(thread_idx + offset < n_rows){
             // NOTE: Absolute values are taken here, and don't need to be done
             // again for comparing block maxes
             tmp = max(abs(tmp), abs(d_vec[thread_idx + offset]));
@@ -403,7 +426,7 @@ void infty_vec_norm_gpu(
         unsigned int i = blockDim.x/2;
         while(i != 0){
             if(threadIdx.x < i){
-                shared_mem[threadIdx.x] = max(shared_mem[threadIdx.x], shared_mem[threadIdx.x + i]);
+                shared_mem[threadIdx.x] = max(abs(shared_mem[threadIdx.x]), abs(shared_mem[threadIdx.x + i]));
             }
             __syncthreads();
             i /= 2;
@@ -420,6 +443,7 @@ void infty_vec_norm_gpu(
         // Critical section
         if(threadIdx.x == 0){
             *d_infty_norm = (*d_infty_norm > shared_mem[0]) ? *d_infty_norm : shared_mem[0];
+            printf("%f >? %f\n", *d_infty_norm, shared_mem[0]);
         }
 
         __threadfence();
@@ -431,8 +455,10 @@ void infty_vec_norm_gpu(
 
         __syncthreads();
         // End locks
-    // }
 
+    printf("d_residual_norm = %f\n", *d_infty_norm);
+    // }
+    
 }
 #endif
 
@@ -440,48 +466,48 @@ void infty_vec_norm_gpu(
  is the infinity norm: ||A*x_new-b||_infty */
 void calc_residual_cpu(
     SparseMtxFormat *sparse_mat,
-    std::vector<double> *x,
-    std::vector<double> *b,
-    std::vector<double> *r,
-    std::vector<double> *tmp
+    double *x,
+    double *b,
+    double *r,
+    double *tmp,
+    int N
 ){
     //Unpack args 
     #pragma omp parallel
     {
 #ifdef USE_USPMV
-        spmv_omp_scs<double, int>(
-            sparse_mat->scs_mat->C, // C
+        uspmv_omp_scs_cpu<double, int>(
+            sparse_mat->scs_mat->C,
             sparse_mat->scs_mat->n_chunks,
             &(sparse_mat->scs_mat->chunk_ptrs)[0],
             &(sparse_mat->scs_mat->chunk_lengths)[0],
             &(sparse_mat->scs_mat->col_idxs)[0],
             &(sparse_mat->scs_mat->values)[0],
-            &(*x)[0],
-            &(*tmp)[0]);
+            x,
+            tmp);
 #else
         spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
 #endif
-        subtract_vectors_cpu(r, b, tmp);
+        subtract_vectors_cpu(r, b, tmp, N);
     }
 }
 
 #ifdef __CUDACC__
-__global__
 void calc_residual_gpu(
     int *d_row_ptr,
     int *d_col,
     double *d_val,
     double *d_x,
-    double *d_r,
     double *d_b,
+    double *d_r,
     double *d_tmp,
     int d_n_rows
 ){
     // TODO: SCS
 
     // TODO: Block and thread count?
-    spmv_crs_gpu<<<1,1>>>(d_val, d_col, d_row_ptr, d_tmp, d_x, d_n_rows);
+    spmv_crs_gpu<<<BLOCKS_PER_GRID,THREADS_PER_BLOCK>>>(d_n_rows, d_row_ptr, d_col, d_val, d_x, d_tmp);
 
-    subtract_vectors_gpu<<<1,1>>>(d_r, d_b, d_tmp);
+    subtract_vectors_gpu<<<BLOCKS_PER_GRID,THREADS_PER_BLOCK>>>(d_r, d_b, d_tmp, d_n_rows);
 }
 #endif
