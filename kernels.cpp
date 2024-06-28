@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <cmath>
 #include <omp.h>
 
 void mtx_spmv_coo(
@@ -69,13 +70,88 @@ void subtract_vectors_cpu(
     double *result_vec,
     const double *vec1,
     const double *vec2,
-    int N
+    int N,
+    double scale
 ){
     // Orphaned directive: Assumed already called within a parallel region
-    #pragma omp for
+    // #pragma omp for
     for (int i = 0; i < N; ++i){
-        result_vec[i] = vec1[i] - vec2[i];
+        result_vec[i] = vec1[i] - scale*vec2[i];
     }
+}
+
+// Tranpose a dense matrix
+void dense_transpose(
+    const double *mat,
+    double *mat_t,
+    int n_rows,
+    int n_cols
+){
+    for(int row_idx = 0; row_idx < n_rows; ++row_idx){
+        for(int col_idx = 0; col_idx < n_cols; ++col_idx){
+            mat_t[col_idx*n_rows + row_idx] = mat[row_idx*n_cols + col_idx]; 
+        }
+    }
+
+}
+
+void scale(
+    double *result_vec,
+    const double *vec,
+    const double scalar,
+    int N
+){
+    // #pragma omp parallel for
+    for (int i = 0; i < N; ++i){
+        result_vec[i] = vec[i] * scalar;
+#ifdef DEBUG_MODE_FINE
+        std::cout << result_vec[i] << " = " << vec[i] << " * " << scalar << std::endl;
+#endif
+    }
+}
+
+void dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N
+){
+    double sum = 0;
+    #pragma omp parallel for reduction(+:sum)
+    for (int i = 0; i < N; ++i){
+        sum += vec1[i] * vec2[i];
+    }
+    *result = sum;
+}
+
+void strided_1_dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N,
+    int stride
+){
+    double sum = 0;
+    // #pragma omp parallel for reduction(+:sum)
+    for (int i = 0; i < N; ++i){
+        sum += vec1[i*stride] * vec2[i];
+    }
+    *result = sum;
+}
+
+void strided_2_dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N,
+    int stride
+){
+    double sum = 0;
+    // #pragma omp parallel for reduction(+:sum)
+    for (int i = 0; i < N; ++i){
+        sum += vec1[i] * vec2[i*stride];
+    }
+    *result = sum;
 }
 
 #ifdef __CUDACC__
@@ -356,6 +432,20 @@ void spltsv_crs(
     }
 }
 
+double euclidean_vec_norm_cpu(
+    const double *vec,
+    int N
+){
+    double tmp = 0.0;
+
+    #pragma omp parallel for reduction(+:tmp)
+    for(int i = 0; i < N; ++i){
+        tmp += vec[i] * vec[i];
+    }
+
+    return std::sqrt(tmp);
+}
+
 double infty_vec_norm_cpu(
     const double *vec,
     int N
@@ -386,6 +476,7 @@ __device__ void release_semaphore(int *mutex){
 }
 
 __global__
+// TODO: known to be buggy/not work
 void infty_vec_norm_gpu(
     const double *d_vec,
     double *d_infty_norm,

@@ -37,9 +37,14 @@ void assign_cli_inputs(
     }
     else if(st == "-cg"){
         *solver_type = "conjugate-gradient";
+        printf("ERROR: assign_cli_inputs: Conjugate Gradient [-cg] is still under development.\n");
+        exit(1);
+    }
+    else if(st == "-gm"){
+        *solver_type = "gmres";
     }
     else{
-        printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient)].\n");
+        printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient) / -gm (GMRES)].\n");
         exit(1);
     }
 }

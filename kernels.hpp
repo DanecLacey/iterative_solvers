@@ -27,6 +27,49 @@ double infty_vec_norm_cpu(
     int N
 );
 
+void scale(
+    double *result_vec,
+    const double *vec,
+    const double scalar,
+    int N
+);
+
+double euclidean_vec_norm_cpu(
+    const double *vec,
+    int N
+);
+
+void dense_transpose(
+    const double *mat,
+    double *mat_t,
+    int n_rows,
+    int n_cols
+);
+
+void dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N
+);
+
+void strided_1_dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N,
+    int stride
+);
+
+
+void strided_2_dot(
+    const double *vec1,
+    const double *vec2,
+    double *result,
+    int N,
+    int stride
+);
+
 #ifdef __CUDACC__
 __global__ 
 void infty_vec_norm_gpu(
@@ -40,7 +83,8 @@ void subtract_vectors_cpu(
     double *result_vec,
     const double *vec1,
     const double *vec2,
-    int N
+    int N,
+    double scale = 1.0
 );
 
 #ifdef __CUDACC__

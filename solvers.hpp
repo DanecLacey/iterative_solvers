@@ -40,6 +40,34 @@ void gs_iteration_sep_cpu(
     int N
 );
 
+void gs_iteration_ref_cpu(
+    SparseMtxFormat *sparse_mat,
+    double *tmp,
+    double *D,
+    double *b,
+    double *x,
+    int N
+);
+
+void gm_iteration_ref_cpu(
+    SparseMtxFormat *sparse_mat,
+    double *V,
+    double *H,
+    double *Q,
+    double *Q_copy,
+    double *w,
+    double *D,
+    double *g,
+    double *g_copy,
+    double *b,
+    double *x,
+    double beta,
+    int n_rows,
+    int iter_count,
+    double *residual_norm,
+    int max_gmres_iters // <- temporary! only for testing
+);
+
 void solve_cpu(
     argType *args
 );

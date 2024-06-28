@@ -67,7 +67,24 @@ void convert_to_crs(
     CRSMtxData *crs_mat
 );
 
+void gmres_get_x(
+    double *R,
+    double *g,
+    double *x,
+    double *x_0,
+    double *V,
+    int n_rows,
+    int iter_count,
+    int max_gmres_iters
+);
+
 void preprocessing(
     argType *args
+);
+
+void init(
+    double *vec,
+    double val,
+    int size
 );
 #endif /*UTILITY_FUNCS_H*/

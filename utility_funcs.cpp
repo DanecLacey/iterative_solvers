@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <iomanip>
 
 #ifdef USE_EIGEN
 #include <Eigen/Sparse>
@@ -16,6 +17,18 @@
 #endif
 
 #include "kernels.hpp"
+
+void init(
+    double *vec,
+    double val,
+    int size
+){
+    // TODO: validate first touch policy?
+    #pragma omp parallel for
+    for(int i = 0; i < size; ++i){
+        vec[i] = val;
+    }
+}
 
 void generate_vector(
     double *vec_to_populate,
@@ -310,6 +323,111 @@ void convert_to_crs(
     delete[] nnzPerRow;
 }
 
+void gmres_get_x(
+    double *R,
+    double *g,
+    double *x,
+    double *x_0,
+    double *V,
+    int n_rows,
+    int iter_count,
+    int max_gmres_iters
+){
+    double *y = new double[max_gmres_iters];
+    init(y, 0.0, max_gmres_iters);
+    double *Vy = new double[n_rows];
+    init(Vy, 0.0, n_rows);
+
+    double diag_elem = 0.0;
+    double sum;
+
+    // Could probably optimize col_idxs/2
+    // Can only solve first "iter_count+1 rows"
+    // for(int row_idx = 0; row_idx <= iter_count; ++row_idx){
+    //     sum = 0.0;
+    //     for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+    //         if(row_idx == col_idx){
+    //             diag_elem = R[(row_idx*max_gmres_iters) + col_idx];
+    //         }
+    //         sum += R[(row_idx*max_gmres_iters) + col_idx] * y[row_idx];
+    //     }
+    //     y[row_idx] = (g[row_idx] - sum) / diag_elem;
+    // }
+
+#ifdef DEBUG_MODE
+    std::cout << "when solving for x, R" << " = [\n";
+    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
+        for(int col_idx = iter_count; col_idx >= 0; --col_idx){
+                std::cout << std::setw(11);
+                std::cout << R[(row_idx*max_gmres_iters) + col_idx]  << ", ";
+            }
+            std::cout << "\n";
+        }
+    // for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
+    //     for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+    //         std::cout << std::setw(11);
+    //         std::cout << R[(row_idx*max_gmres_iters) + col_idx]  << ", ";
+    //     }
+    //     std::cout << "\n";
+    // }
+
+    std::cout << "]" << std::endl;
+#endif
+
+    // (dense) Backward triangular solve Ry = g ((m+1 x m)(m x 1) = (m+1 x 1))
+    // Traverse R \in \mathbb{R}^(m+1 x m) from last to first row
+    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
+        sum = 0.0;
+        for(int col_idx = row_idx; col_idx < max_gmres_iters; ++col_idx){
+            if(row_idx == col_idx){
+                diag_elem = R[(row_idx*max_gmres_iters) + col_idx];
+            }
+            else{
+                sum += R[(row_idx*max_gmres_iters) + col_idx] * y[col_idx];
+            }
+            
+        }
+        y[row_idx] = (g[row_idx] - sum) / diag_elem;
+        // std::cout << g[row_idx] << " - " << sum << " / " << diag_elem << std::endl; 
+    }
+
+#ifdef DEBUG_MODE
+    std::cout << "y_" << iter_count << " = [\n";
+    for(int i = 0; i < max_gmres_iters; ++i){
+        std::cout << y[i]  << ", ";
+    }
+    std::cout << "]" << std::endl;
+#endif
+
+    // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
+    for(int col_idx = 0; col_idx < n_rows; ++col_idx){
+        double tmp = 0.0;
+        // strided_1_dot(&V[col_idx], y, &tmp, max_gmres_iters, n_rows);
+        for (int i = 0; i < max_gmres_iters; ++i){
+            tmp += V[i*n_rows + col_idx] * y[i];
+            // std::cout << V[i*n_rows + col_idx] << " * " << y[i] << std::endl; 
+        }
+    Vy[col_idx] = tmp;
+    }
+
+#ifdef DEBUG_MODE
+    std::cout << "Vy_" << iter_count << " = [\n";
+    for(int i = 0; i < n_rows; ++i){
+        std::cout << Vy[i]  << ", ";
+    }
+    std::cout << "]" << std::endl;
+#endif
+
+    // Finally, solve for x ((n x 1) = (n x 1) + (n x m)(m x 1))
+    for(int i = 0; i < n_rows; ++i){
+        x[i] = x_0[i] + Vy[i];
+        // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
+    }
+
+    delete y;
+    delete Vy;
+}
+
 // TODO: MPI preprocessing will go here
 void preprocessing(
     argType *args
@@ -448,6 +566,19 @@ void preprocessing(
     // Easier to just do on the host for now
     calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->vec_size);
 
+    if(args->solver_type == "gmres"){
+        // args->beta = infty_vec_norm_cpu(args->r, args->vec_size);
+        args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);
+        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+#ifdef DEBUG_MODE
+    std::cout << "init_v = [";
+        for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
+            std::cout << args->init_v[i] << ", ";
+        }
+    std::cout << "]" << std::endl;
+#endif
+    }
+
 #ifdef DEBUG_MODE
     printf("initial residual = [");
     for(int i = 0; i < args->vec_size; ++i){
@@ -456,7 +587,21 @@ void preprocessing(
     printf("]\n");
 #endif
 
-    args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r, args->vec_size); 
+    double norm_r0;
+
+    if(args->solver_type == "gmres"){
+        norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
+        args->loop_params->stopping_criteria = args->loop_params->tol * euclidean_vec_norm_cpu(args->r, args->vec_size); 
+    }
+    else{
+        norm_r0 = infty_vec_norm_cpu(args->r, args->vec_size);
+        args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r, args->vec_size); 
+    }
+
+#ifdef DEBUG_MODE
+    printf("norm(initial residual) = %f\n", norm_r0);
+    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
+#endif
 
 // #ifdef __CUDACC__
 //     // The first residual is computed on the host, and given to the device

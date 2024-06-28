@@ -380,6 +380,8 @@ struct argType {
     double *D;
     double *r;
     double *b;
+    double beta;
+    double *init_v;
     double *normed_residuals;
     LoopParams *loop_params;
     std::string solver_type;

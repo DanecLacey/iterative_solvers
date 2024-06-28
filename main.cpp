@@ -30,6 +30,7 @@ int main(int argc, char *argv[]){
      *      Gauss-Seidel Iteration
      *          x_k = (D+L)^{-1}(b - Ux_{k-1}) 
      *      Conjugate Gradient (under development)
+     *      GMRES (under development)
      * until tolerance
      *      "||b - Ax_k|| / ||b - Ax_0|| < tol"
      * is reached
@@ -63,7 +64,7 @@ int main(int argc, char *argv[]){
     LoopParams loop_params{
         0, // init iteration count
         0, // init residuals count
-        50, // calculate residual every n iterations
+        1, // calculate residual every n iterations
         3000, // maximum iteration count
         0.0, // init stopping criteria
         1e-14, // tolerance to stop iterations
@@ -83,6 +84,9 @@ int main(int argc, char *argv[]){
     double *r = new double[args->vec_size];
     double *b = new double[args->vec_size];
     double *normed_residuals = new double[loop_params.max_iters / loop_params.residual_check_len + 1];
+
+    // Only used for GMRES... probably guard somehow
+    double *init_v = new double[args->vec_size];
     
     args->coo_mat = coo_mat;
     args->x_star = x_star;
@@ -93,6 +97,8 @@ int main(int argc, char *argv[]){
     args->r = r;
     args->b = b;
     args->normed_residuals = normed_residuals;
+    args->init_v = init_v;
+
     args->loop_params = &loop_params;
     args->solver_type = solver_type;
     args->flags = &flags;
@@ -179,6 +185,10 @@ int main(int argc, char *argv[]){
     delete D;
     delete r;
     delete b;
+
+    if(args->solver_type == "gmres"){
+        delete init_v;
+    }
 
 #ifdef __CUDACC__
     cudaFree(args->d_x_star);
