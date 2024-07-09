@@ -4,10 +4,10 @@
 inline void sort_perm(int *arr, int *perm, int len, bool rev=false);
 
 void assign_cli_inputs(
+    argType *args, 
     int argc,
     char *argv[],
-    std::string *matrix_file_name,
-    std::string *solver_type
+    std::string *matrix_file_name
 );
 
 void read_mtx(
@@ -22,12 +22,6 @@ void summary_output(
     Flags flags,
     double total_time_elapsed,
     double calc_time_elapsed
-);
-
-void iter_output(
-    const double *x_approx,
-    int N,
-    int iter_count
 );
 
 void residuals_output(

@@ -1,6 +1,5 @@
 # Options: gcc, icc, icx, nvcc
-COMPILER=nvcc
-
+COMPILER=gcc
 # Only applicable for gpu builds
 # Options: a40, a100
 GPGPU_ARCH=a40

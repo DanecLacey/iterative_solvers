@@ -101,12 +101,13 @@ void scale(
     const double scalar,
     int N
 ){
+    std::cout << "Inside of scale" << std::endl;
     // #pragma omp parallel for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec[i] * scalar;
-#ifdef DEBUG_MODE_FINE
+// #ifdef DEBUG_MODE_FINE
         std::cout << result_vec[i] << " = " << vec[i] << " * " << scalar << std::endl;
-#endif
+// #endif
     }
 }
 

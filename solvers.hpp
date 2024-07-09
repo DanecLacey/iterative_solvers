@@ -53,10 +53,12 @@ void gm_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
     double *V,
     double *H,
+    double *H_tmp,
+    double *J,
     double *Q,
     double *Q_copy,
     double *w,
-    double *D,
+    double *R,
     double *g,
     double *g_copy,
     double *b,
@@ -69,7 +71,8 @@ void gm_iteration_ref_cpu(
 );
 
 void solve_cpu(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 );
 
 #ifdef __CUDACC__
@@ -97,11 +100,13 @@ void jacobi_iteration_sep_gpu(
 );
 
 void solve_gpu(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 );
 #endif
 
 void solve(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 );
 #endif /*SOLVERS_H*/

@@ -402,11 +402,11 @@ void gmres_get_x(
     // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
     for(int col_idx = 0; col_idx < n_rows; ++col_idx){
         double tmp = 0.0;
-        // strided_1_dot(&V[col_idx], y, &tmp, max_gmres_iters, n_rows);
-        for (int i = 0; i < max_gmres_iters; ++i){
-            tmp += V[i*n_rows + col_idx] * y[i];
-            // std::cout << V[i*n_rows + col_idx] << " * " << y[i] << std::endl; 
-        }
+        strided_1_dot(&V[col_idx], y, &tmp, max_gmres_iters, n_rows);
+        // for (int i = 0; i < max_gmres_iters; ++i){
+        //     tmp += V[i*n_rows + col_idx] * y[i];
+        //     // std::cout << V[i*n_rows + col_idx] << " * " << y[i] << std::endl; 
+        // }
     Vy[col_idx] = tmp;
     }
 
@@ -426,6 +426,117 @@ void gmres_get_x(
 
     delete y;
     delete Vy;
+}
+
+void init_gmres_structs(
+    argType *args,
+    int n_rows
+){
+    int restart_len = args->gmres_restart_len;
+        
+        init(args->V, 0.0, n_rows * restart_len);
+        // Give v0 to first row of V
+        for(int i = 0; i < n_rows; ++i){
+            args->V[i] = args->init_v[i];
+        }
+        
+        init(args->H, 0.0, restart_len * (restart_len+1));
+        
+        init(args->R, 0.0, restart_len * (restart_len+1));
+
+        // TODO: wrap up in something cleaner
+        // Initialize 1s in identity matrix
+        for(int i = 0; i <= restart_len; ++i){
+            for (int j = 0; j < restart_len; ++j){
+                if(i == j){
+                    args->R[i*(restart_len+1) + j] = 1.0;
+                }
+            }
+        }
+        
+        init(args->Q, 0.0, (restart_len+1) * (restart_len+1));
+        init(args->Q_copy, 0.0, (restart_len+1) * (restart_len+1));
+
+        // TODO: wrap up in something cleaner
+        // Initialize 1s in identity matrix
+        for(int i = 0; i <= restart_len; ++i){
+            for (int j = 0; j <= restart_len; ++j){
+                if(i == j){
+                    args->Q[i*(restart_len+1) + j] = 1.0;
+                    args->Q_copy[i*(restart_len+1) + j] = 1.0;
+                }
+            }
+        }
+
+        init(args->g, 0.0, restart_len+1);
+        args->g[0] = args->beta; // <- supply starting element
+        
+        init(args->g_copy, 0.0, restart_len+1);
+        args->g_copy[0] = args->beta; // <- supply starting element
+}
+
+void record_residual_norm(
+    argType *args,
+    Flags *flags,
+    SparseMtxFormat *sparse_mat,
+    double *residual_norm,
+    double *r,
+    double *x,
+    double *b,
+    double *x_new,
+    double *tmp
+){
+    if(args->solver_type == "jacobi"){
+        calc_residual_cpu(sparse_mat, x_new, b, r, tmp, args->vec_size);
+        *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
+    }
+
+    if(args->solver_type == "gauss-seidel"){
+        calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
+        *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
+    }
+    
+    if(args->solver_type == "gmres"){
+        // NOTE: While not needed for GMRES in theory, it is helpful to compare
+        // a computed residual with g[-1] when debugging 
+        calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
+        *residual_norm = euclidean_vec_norm_cpu(r, args->vec_size);
+    }
+    
+    args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
+    
+    if(!flags->convergence_flag)
+        ++args->loop_params->residual_count;
+}
+
+void iter_output(
+    const double *x_approx,
+    int N,
+    int iter_count
+){
+    printf("On iter: %i, x appox is:\n", iter_count);
+    for(int i = 0; i < N; ++i){
+        printf("idx: %i, val: %f\n", i, x_approx[i]);
+    }
+}
+
+void print_x(
+    argType *args,
+    double *x,
+    double *x_new,
+    double *x_old,
+    int n_rows
+){
+    if(args->solver_type == "jacobi"){
+        iter_output(x_new, args->vec_size, args->loop_params->iter_count);
+    }
+    if(args->solver_type == "gauss-seidel"){
+        iter_output(x, args->vec_size, args->loop_params->iter_count);
+    }
+    if(args->solver_type == "gmres"){
+        gmres_get_x(args->R, args->g, x, x_old, args->V, n_rows, args->loop_params->iter_count, args->gmres_restart_len);
+        iter_output(x, args->vec_size, args->loop_params->iter_count);
+    }
 }
 
 // TODO: MPI preprocessing will go here
@@ -500,20 +611,6 @@ void preprocessing(
     cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
 #endif
 
-    // Resize all working arrays, now that we know the right size
-    // std::vector<double> x_star;
-    // x_star->resize(args->vec_size, 0.0);
-
-    // std::copy(args->x_star.begin(), args->x_star.end(), test_array_x_star);
-
-
-    // args->x_new->resize(args->vec_size, 0.0);
-    // args->x_old->resize(args->vec_size, 0.0);
-    // args->tmp->resize(args->vec_size, 0.0);
-    // args->D->resize(args->vec_size, 0.0);
-    // args->r->resize(args->vec_size, 0.0);
-    // args->b->resize(args->vec_size, 0.0);
-
     extract_diag(args->coo_mat, args->D);
 
     // Make b vector
@@ -569,7 +666,14 @@ void preprocessing(
     if(args->solver_type == "gmres"){
         // args->beta = infty_vec_norm_cpu(args->r, args->vec_size);
         args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);
-        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+#ifdef DEBUG_MODE
+    std::cout << "init_v = [";
+        for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
+            std::cout << args->init_v[i] << ", ";
+        }
+    std::cout << "]" << std::endl;
+#endif
+        // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
 #ifdef DEBUG_MODE
     std::cout << "init_v = [";
         for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){

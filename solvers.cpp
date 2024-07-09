@@ -160,6 +160,8 @@ void gm_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
     double *V,
     double *H,
+    double *H_tmp,
+    double *J,
     double *Q,
     double *Q_copy,
     double *w,
@@ -325,7 +327,6 @@ void gm_iteration_ref_cpu(
     ///////////////////// Least Squares Step /////////////////////
 
     // Per-iteration "local" Givens rotation (m+1 x m+1) matrix
-    double *J = new double[(max_gmres_iters+1) * (max_gmres_iters+1)];
     init(J, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1)); 
 
     // Initialize 1s in identity matrix
@@ -340,7 +341,6 @@ void gm_iteration_ref_cpu(
     // The effect all of rotations so far upon the (k+1 x k) Hesseberg matrix
     // (except we store as row vectors, for pointer reasons...)
     // TODO: Maybe simpler to just allocate same memory as H for now? Although very unnecessary
-    double *H_tmp = new double[(max_gmres_iters+1) * max_gmres_iters]; // (m+1 x m)
     init(H_tmp, 0.0, (max_gmres_iters+1) * max_gmres_iters); 
     
     // Initialize 1s in identity matrix
@@ -697,8 +697,8 @@ void gm_iteration_ref_cpu(
 #endif
 
     // TODO: just allocate in preprocessing
-    delete J;
-    delete H_tmp;
+    // delete J;
+    // delete H_tmp;
     // delete Q_copy;
 
 #ifdef DEBUG_MODE
@@ -714,18 +714,19 @@ void gm_iteration_ref_cpu(
 }
 
 void solve_cpu(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 ){
-    int n_rows = args->sparse_mat->crs_mat->n_rows;
+    
     // Unpack relevant args
-    // double *x = args->x_old; // GS and GMRES
-    // double *x_new = args->x_new; // Jacobi
-    // double *x_old = args->x_old; // Jacobi and (sometimes) GMRES
+    int n_rows = args->sparse_mat->crs_mat->n_rows;
+    int gmres_len = loop_params->gmres_restart_len;
+
     double *x = new double[n_rows];
     double *x_new = new double[n_rows];
     double *x_old = new double[n_rows];
 
-    // Need deep copy
+    // Need deep copy TODO: rethink and do better
     for(int i = 0; i < n_rows; ++i){
         x[i] = args->x_old[i];
         x_new[i] = args->x_new[i];
@@ -747,57 +748,9 @@ void solve_cpu(
         printf("\n");
     }
 
-    // TODO: should put in preprocessing
-    // NOTE: only temporary for mem allocation, for testing
-    // Restart length can take the place of this I guess
-    int max_gmres_iters = 100;
-    // ^ For testing purposes, we only search the first 10 krylov dims
-    // TODO: only used for GMRES... so should guard somehow
-    double *V = new double[sparse_mat->crs_mat->n_rows * max_gmres_iters]; // (m x n)
-    init(V, 0.0, sparse_mat->crs_mat->n_rows * max_gmres_iters);
-    // Give v0 to first row of V
-    for(int i = 0; i < sparse_mat->crs_mat->n_rows; ++i){
-        V[i] = args->init_v[i];
+    if(args->solver_type == "gmres"){
+        init_gmres_structs(args, n_rows);
     }
-    
-    double *H = new double[(max_gmres_iters+1) * max_gmres_iters]; // (m+1 x m) 
-    init(H, 0.0, max_gmres_iters * (max_gmres_iters+1));
-    //  (^transposed to store as row vectors instead)
-
-    double *R_outer = new double[max_gmres_iters * (max_gmres_iters+1)];
-    init(R_outer, 0.0, max_gmres_iters * (max_gmres_iters+1));
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= max_gmres_iters; ++i){
-        for (int j = 0; j < max_gmres_iters; ++j){
-            if(i == j){
-                R_outer[i*(max_gmres_iters+1) + j] = 1.0;
-            }
-        }
-    }
-
-    double *Q = new double[(max_gmres_iters+1) * (max_gmres_iters+1)]; // (m+1 x m+1)
-    init(Q, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1));
-
-    double *Q_copy = new double[(max_gmres_iters+1) * (max_gmres_iters+1)]; // (m+1 x m+1)
-    init(Q_copy, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1));
-
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= max_gmres_iters; ++i){
-        for (int j = 0; j <= max_gmres_iters; ++j){
-            if(i == j){
-                Q[i*(max_gmres_iters+1) + j] = 1.0;
-                Q_copy[i*(max_gmres_iters+1) + j] = 1.0;
-            }
-        }
-    }
-
-    double *g = new double[max_gmres_iters+1];
-    init(g, 0.0, max_gmres_iters+1);
-    g[0] = args->beta; // <- supply starting element
-    double *g_copy = new double[max_gmres_iters+1];
-    init(g_copy, 0.0, max_gmres_iters+1);
-    g_copy[0] = args->beta; // <- supply starting element
-    
 
 #ifdef DEBUG_MODE
     std::cout << "x vector:" << std::endl;
@@ -811,10 +764,7 @@ void solve_cpu(
     start_time(&calc_time_start);
 
     do{
-        // TODO: really lazy, and is only "needed" for GMRES. Put somewhere else!!
-        // Only the upper triangular part of H (again stored as row vectors, so transposed)
-        // double *R = new double[(args->loop_params->iter_count-1) * args->loop_params->iter_count];
-
+        // TODO: change to solver class methods
         if(args->solver_type == "jacobi"){
             // For a reference solution, not meant for use with USpMV library
             jacobi_iteration_ref_cpu(sparse_mat, D, b, x_old, x_new);
@@ -828,98 +778,41 @@ void solve_cpu(
         else if(args->solver_type == "gmres"){
             gm_iteration_ref_cpu(
                 sparse_mat, 
-                V,
-                H,
-                Q,
-                Q_copy,
+                args->V,
+                args->H,
+                args->H_tmp,
+                args->J,
+                args->Q,
+                args->Q_copy,
                 tmp, 
-                R_outer,
-                g,
-                g_copy,
+                args->R,
+                args->g,
+                args->g_copy,
                 b, 
                 x,
                 args->beta,
                 args->vec_size,
                 args->loop_params->iter_count,
                 &residual_norm,
-                max_gmres_iters
+                gmres_len
             );
         }
-        
-        // GMRES does not compute x each iteration by default
-        if(args->solver_type == "jacobi" || args->solver_type == "gauss-seidel"){
-            if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0){
-                
-                // Record residual every "residual_check_len" iterations
-                if(args->solver_type == "jacobi"){
-                    calc_residual_cpu(sparse_mat, x_new, b, r, tmp, args->vec_size);
-                }
-                else if(args->solver_type == "gauss-seidel"){
-                    calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
-                }
-                
-                residual_norm = infty_vec_norm_cpu(r, args->vec_size);
-                args->normed_residuals[args->loop_params->residual_count] = residual_norm;
-                ++args->loop_params->residual_count;
 
-                if(flags->print_iters){
-                    if(args->solver_type == "jacobi"){
-                        iter_output(x_new, args->vec_size, args->loop_params->iter_count);
-                    }
-                    else if(args->solver_type == "gauss-seidel"){
-                        iter_output(x, args->vec_size, args->loop_params->iter_count);
-                    }
-                }
-            }
-        }
+        // Record residual every "residual_check_len" iterations
+        if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0)
+            record_residual_norm(args, flags, sparse_mat, &residual_norm, r, x, b, x_new, tmp);
 
-#ifdef DEBUG_MODE
-// TODO: seems like redundant functionality with what is directly above...
-        std::cout << "x_" << args->loop_params->iter_count+1 <<" = [";
-        if(args->solver_type == "jacobi"){
-            for(int i = 0; i < args->vec_size; ++i){
-                std::cout << x_new[i] << ", ";
-            }
-        }
-        else if (args->solver_type == "gauss-seidel"){
-            for(int i = 0; i < args->vec_size; ++i){
-                std::cout << x[i] << ", ";
-            }
-        }
-        else if(args->solver_type == "gmres"){
-            // // Take all but the last row of V
-            gmres_get_x(R_outer, g, x, x_old, V, sparse_mat->crs_mat->n_rows, args->loop_params->iter_count, max_gmres_iters);
-            // for(int i = 0; i < args->vec_size; ++i){
-            //     std::cout << x[i] << ", ";
-            // }
-        }
-        std::cout << "]" << std::endl;
-  
-        if(args->solver_type == "gmres"){
-            calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
-            std::cout << "computed residual norm: " << euclidean_vec_norm_cpu(r, args->vec_size) << std::endl;
-        }
-        else{
-            // Might not be computed here
-            std::cout << "computed residual norm: " << infty_vec_norm_cpu(r, args->vec_size) << std::endl;
-        }
-        std::cout << "stopping_criteria: " << args->loop_params->stopping_criteria << std::endl; 
-#endif  
+        if(flags->print_iters)
+            print_x(args, x, x_new, x_old, n_rows);  
 
-        if(args->solver_type == "jacobi"){
+        // Need to swap arrays every iteration in the case of Jacobi solver
+        if(args->solver_type == "jacobi")
             std::swap(x_new, x_old);
-        }
     
         ++args->loop_params->iter_count;
-        // if(residual_norm > args->loop_params->stopping_criteria && args->loop_params->iter_count < args->loop_params->max_iters){
-        //     // A very lazy way of saving the "upper triangular" matrix 
-        //     std::swap(R_outer, R);
-        // }
-
-        // delete R;
 
     } while(
-        args->loop_params->iter_count < n_rows &&
+        // args->loop_params->iter_count < n_rows &&
         residual_norm > args->loop_params->stopping_criteria && 
         args->loop_params->iter_count < args->loop_params->max_iters
     );
@@ -927,57 +820,43 @@ void solve_cpu(
     args->flags->convergence_flag = (residual_norm <= args->loop_params->stopping_criteria) ? true : false;
 
     if(args->solver_type == "jacobi"){
-        std::swap(x_old, args->x_star);
+        // TODO: Bandaid, sincne swapping seems to not work :(
+        #pragma omp parallel for
+        for(int i = 0; i < n_rows; ++i){
+            args->x_star[i] = x_old[i];
+            // std::cout << "args->x_star[" << i << "] = " << x_old[i] << "==" << args->x_star[i] << std::endl;
+        }
+        // std::swap(args->x_star, x_old);
+
     }
     else if (args->solver_type == "gauss-seidel"){
-        std::swap(x, args->x_star);
+        #pragma omp parallel for
+        for(int i = 0; i < n_rows; ++i){
+            args->x_star[i] = x[i];
+            // std::cout << "args->x_star[" << i << "] = " << x[i] << "==" << args->x_star[i] << std::endl;
+        }
+        // std::swap(x, args->x_star);
     }    
     
-    // Record final residual with approximated solution vector x
-    if(args->solver_type == "gmres"){
-        // TODO: store upper triangular of H in a better place
-        // By default, GMRES doesn't compute actual x approximation until after convergence
-        gmres_get_x(R_outer, g, args->x_star, x_old, V, sparse_mat->crs_mat->n_rows, args->loop_params->iter_count - 1, max_gmres_iters);
-        std::cout << "x_star = [";
-        for(int i = 0; i < args->vec_size; ++i){
-                std::cout << args->x_star[i] << ", ";
-            }
-        std::cout << "]" << std::endl;
-        calc_residual_cpu(sparse_mat, args->x_star, b, r, tmp, args->vec_size);
-        args->normed_residuals[args->loop_params->residual_count] = euclidean_vec_norm_cpu(r, args->vec_size);
-        std::cout << "args->normed_residuals[args->loop_params->residual_count] = " << args->normed_residuals[args->loop_params->residual_count] <<std::endl;
-    }
-    else{
-        calc_residual_cpu(sparse_mat, args->x_star, b, r, tmp, args->vec_size);
+    // Record final residual with approximated solution vector x_star
+    if(args->solver_type == "gmres")
+        gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, sparse_mat->crs_mat->n_rows, args->loop_params->iter_count - 1, gmres_len);
 
-        args->normed_residuals[args->loop_params->residual_count] = infty_vec_norm_cpu(r, args->vec_size);
-        std::cout << "args->normed_residuals[args->loop_params->residual_count] = " << args->normed_residuals[args->loop_params->residual_count] <<std::endl;
-    }
+    record_residual_norm(args, flags, sparse_mat, &residual_norm, r, args->x_star, b, args->x_star, tmp);
 
+// #ifdef USE_USPMV
+//     // Bring final result vector out of permuted space
+//     double *x_star_perm = new double[args->vec_size];
+//     apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
 
-#ifdef USE_USPMV
-    // Bring final result vector out of permuted space
-    double *x_star_perm = new double[args->vec_size];
-    apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+//     // Deep copy, so you can free memory
+//     // TODO: wrap in func
+//     for(int i = 0; i < args->vec_size; ++i){
+//         args->x_star[i] = x_star_perm[i];
+//     }
 
-    // Deep copy, so you can free memory
-    // TODO: wrap in func
-    for(int i = 0; i < args->vec_size; ++i){
-        args->x_star[i] = x_star_perm[i];
-    }
-
-    delete x_star_perm;
-#endif
-
-    if(args->solver_type == "gmres"){
-        delete V;
-        delete H;
-        delete Q;
-        delete Q_copy;
-        delete g;
-        delete g_copy;
-        delete R_outer;
-    }
+//     delete x_star_perm;
+// #endif
 
     delete x;
     delete x_new;
@@ -1066,7 +945,8 @@ void jacobi_iteration_sep_gpu(
 }
 
 void solve_gpu(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 ){
 
     // NOTE: Only for convenience. Will change to UM later.
@@ -1268,11 +1148,12 @@ void solve_gpu(
 #endif
 
 void solve(
-    argType *args
+    argType *args,
+    LoopParams *loop_params
 ){
 #ifndef __CUDACC__
-    solve_cpu(args);
+    solve_cpu(args, loop_params);
 #else
-    solve_gpu(args);
+    solve_gpu(args, loop_params);
 #endif
 }

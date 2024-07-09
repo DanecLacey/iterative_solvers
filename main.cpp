@@ -39,13 +39,13 @@ int main(int argc, char *argv[]){
      *      Report number of iterations and validate A * x_star = b
      *      Export errors per iteration to external text file
      * */
-
     struct timeval total_time_start, total_time_end;
     start_time(&total_time_start);
 
     // Declare and init input structs
-    std::string matrix_file_name, solver_type;
-    assign_cli_inputs(argc, argv, &matrix_file_name, &solver_type);
+    argType *args = new argType;
+    std::string matrix_file_name;
+    assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
     COOMtxData *coo_mat = new COOMtxData;
     read_mtx(matrix_file_name, coo_mat);
@@ -65,14 +65,15 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        3000, // maximum iteration count
+        50000, // maximum iteration count
         0.0, // init stopping criteria
-        1e-14, // tolerance to stop iterations
-        1.1, // init value for b
-        3.0 // init value for x
+        1e-13, // tolerance to stop iterations
+        21.1, // init value for b
+        3.0, // init value for x
+        20 // GMRES restart length
     };
 
-    argType *args = new argType;
+    
     SparseMtxFormat *sparse_mat = new SparseMtxFormat;
 
     args->vec_size = coo_mat->n_cols;
@@ -85,8 +86,41 @@ int main(int argc, char *argv[]){
     double *b = new double[args->vec_size];
     double *normed_residuals = new double[loop_params.max_iters / loop_params.residual_check_len + 1];
 
-    // Only used for GMRES... probably guard somehow
-    double *init_v = new double[args->vec_size];
+    double *init_v;
+    double *V;
+    double *H;
+    double *H_tmp;
+    double *J;
+    double *R;
+    double *Q;
+    double *Q_copy;
+    double *g;
+    double *g_copy; 
+
+    if(args->solver_type == "gmres"){
+        std::cout << "Allocating space" << std::endl;
+        double *init_v = new double[args->vec_size];
+        double *V = new double[sparse_mat->crs_mat->n_rows * loop_params.gmres_restart_len]; // (m x n)
+        double *H = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m) 
+        double *H_tmp = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m)
+        double *J = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)];
+        double *R = new double[loop_params.gmres_restart_len * (loop_params.gmres_restart_len+1)];
+        double *Q = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
+        double *Q_copy = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
+        double *g = new double[loop_params.gmres_restart_len+1];
+        double *g_copy = new double[loop_params.gmres_restart_len+1];
+
+        args->init_v = init_v;
+        args->V = V;
+        args->H = H;
+        args->H_tmp = H_tmp;
+        args->J = J;
+        args->R = R;
+        args->Q = Q;
+        args->Q_copy = Q_copy;
+        args->g = g;
+        args->g_copy = g_copy;
+    }
     
     args->coo_mat = coo_mat;
     args->x_star = x_star;
@@ -97,13 +131,12 @@ int main(int argc, char *argv[]){
     args->r = r;
     args->b = b;
     args->normed_residuals = normed_residuals;
-    args->init_v = init_v;
 
     args->loop_params = &loop_params;
-    args->solver_type = solver_type;
     args->flags = &flags;
     args->matrix_file_name = &matrix_file_name;
     args->sparse_mat = sparse_mat;
+    args->gmres_restart_len = loop_params.gmres_restart_len;
 
 #ifdef __CUDACC__
     // Just give pointers to args struct now, allocate on device later
@@ -158,7 +191,7 @@ int main(int argc, char *argv[]){
 
     preprocessing(args);
 
-    solve(args);
+    solve(args, &loop_params);
 
     args->total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
@@ -188,6 +221,15 @@ int main(int argc, char *argv[]){
 
     if(args->solver_type == "gmres"){
         delete init_v;
+        delete V;
+        delete H;
+        delete H_tmp;
+        delete J;
+        delete R;
+        delete Q;
+        delete Q_copy;
+        delete g;
+        delete g_copy;
     }
 
 #ifdef __CUDACC__

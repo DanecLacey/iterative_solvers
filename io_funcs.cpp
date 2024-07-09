@@ -15,10 +15,10 @@ inline void sort_perm(int *arr, int *perm, int len, bool rev=false)
 }
 
 void assign_cli_inputs(
+    argType *args, 
     int argc,
     char *argv[],
-    std::string *matrix_file_name,
-    std::string *solver_type
+    std::string *matrix_file_name
     )
 {
     if(argc != 3){
@@ -30,23 +30,24 @@ void assign_cli_inputs(
     std::string st = argv[2];
 
     if(st == "-j"){
-        *solver_type = "jacobi"; 
+        args->solver_type = "jacobi"; 
     }
     else if(st == "-gs"){
-        *solver_type = "gauss-seidel";
+        args->solver_type = "gauss-seidel";
     }
     else if(st == "-cg"){
-        *solver_type = "conjugate-gradient";
+        args->solver_type = "conjugate-gradient";
         printf("ERROR: assign_cli_inputs: Conjugate Gradient [-cg] is still under development.\n");
         exit(1);
     }
     else if(st == "-gm"){
-        *solver_type = "gmres";
+        args->solver_type = "gmres";
     }
     else{
         printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient) / -gm (GMRES)].\n");
         exit(1);
     }
+
 }
 
 void read_mtx(
@@ -251,17 +252,7 @@ void summary_output(
     if(flags.print_residuals){
         residuals_output(flags.print_residuals, residuals_vec, loop_params);
     }
-}
 
-void iter_output(
-    const double *x_approx,
-    int N,
-    int iter_count
-){
-    printf("On iter: %i, x appox is:\n", iter_count);
-    for(int i = 0; i < N; ++i){
-        printf("idx: %i, val: %f\n", i, x_approx[i]);
-    }
 }
 
 void write_residuals_to_file(std::vector<double> *residuals_vec){
@@ -339,6 +330,13 @@ void postprocessing(
     if(args->flags->print_summary){
         summary_output(args->normed_residuals, &args->solver_type, *args->loop_params, *args->flags, args->total_time_elapsed, args->calc_time_elapsed);
     }
+
+    std::cout << "The solution vector is x = [" << std::endl;
+    for(int i = 0; i < args->vec_size; ++i){
+        printf("%f, ", args->x_star[i]);
+    }
+    std::cout << "]" << std::endl;
+
     
     //sufficent to just print to stdout for now
     // if(flags.print_residuals){

@@ -82,6 +82,37 @@ void preprocessing(
     argType *args
 );
 
+void init_gmres_structs(
+    argType *args,
+    int n_rows
+);
+
+void record_residual_norm(
+    argType *args,
+    Flags *flags,
+    SparseMtxFormat *sparse_mat,
+    double *residual_norm,
+    double *r,
+    double *x,
+    double *b,
+    double *x_new,
+    double *tmp
+);
+
+void iter_output(
+    const double *x_approx,
+    int N,
+    int iter_count
+);
+
+void print_x(
+    argType *args,
+    double *x,
+    double *x_new,
+    double *x_old,
+    int n_rows
+);
+
 void init(
     double *vec,
     double val,

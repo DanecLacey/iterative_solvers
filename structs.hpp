@@ -33,6 +33,7 @@ struct LoopParams
     double tol;
     double init_b;
     double init_x;
+    int gmres_restart_len;
 };
 
 struct CRSMtxData
@@ -380,8 +381,19 @@ struct argType {
     double *D;
     double *r;
     double *b;
+    
+    // gmres args
     double beta;
     double *init_v;
+    double *V;
+    double *H;
+    double *H_tmp;
+    double *J;
+    double *R;
+    double *Q;
+    double *Q_copy;
+    double *g;
+    double *g_copy;
     double *normed_residuals;
     LoopParams *loop_params;
     std::string solver_type;
@@ -390,6 +402,8 @@ struct argType {
     double calc_time_elapsed;
     double total_time_elapsed;
     int vec_size;
+    int gmres_restart_len;
+
 #ifdef __CUDACC__
     double *d_x_star; 
     double *d_x_new;
