@@ -13,7 +13,7 @@ void jacobi_iteration_ref_cpu(
     double *x_old,
     double *x_new // treat like y
 ){
-    double diag_elem = 0;
+    double diag_elem = 0.0;
     double sum = 0;
 
     #pragma omp parallel for schedule (static)
@@ -22,12 +22,15 @@ void jacobi_iteration_ref_cpu(
         for(int nz_idx = sparse_mat->crs_mat->row_ptr[row_idx]; nz_idx < sparse_mat->crs_mat->row_ptr[row_idx+1]; ++nz_idx){
             if(row_idx == sparse_mat->crs_mat->col[nz_idx]){
                 diag_elem = sparse_mat->crs_mat->val[nz_idx];
+                // if (std::abs(diag_elem) < 1e16)
+                //     diag_elem = 1.0; // What to do in this case?
             }
             else{
                 sum += sparse_mat->crs_mat->val[nz_idx] * x_old[sparse_mat->crs_mat->col[nz_idx]];
             }
         }
         x_new[row_idx] = (b[row_idx] - sum) / diag_elem;
+        // std::cout << "x_new[" << row_idx << "] = " << b[row_idx] << " - " << sum << " / " <<  diag_elem <<std::endl;
     }
 }
 

@@ -8,6 +8,8 @@
     #include "../Ultimate-SpMV/code/interface.hpp"
 #endif
 
+#include "mmio.h"
+
 
 
 // NOTE: Is not having default bools really bad?
@@ -111,6 +113,28 @@ struct COOMtxData
     // void print(void);
 
     // void convert_to_crs(CRSMtxData *rhs);
+
+    void write_to_mtx_file(int my_rank, std::string file_out_name)
+    {
+        std::string file_name = file_out_name + "_rank_" + std::to_string(my_rank) + ".mtx"; 
+
+        int elem_num = 0;
+        for(int nz_idx = 0; nz_idx < nnz; ++nz_idx){
+            ++I[nz_idx];
+            ++J[nz_idx];
+        }
+
+        mm_write_mtx_crd(
+            &file_name[0], 
+            n_rows, 
+            n_cols, 
+            nnz, 
+            &(I)[0], 
+            &(J)[0], 
+            &(values)[0], 
+            "MCRG" // TODO: <- make more general, i.e. flexible based on the matrix. Read from original mtx?
+        );
+    }
 
 bool operator==(COOMtxData &rhs)
     {
@@ -372,6 +396,10 @@ struct SparseMtxFormat{
 // #endif
 
 struct argType {
+#ifdef USE_SCAMAC
+    char *scamac_args;
+#endif
+
     COOMtxData *coo_mat;
     SparseMtxFormat *sparse_mat;
     double *x_star;

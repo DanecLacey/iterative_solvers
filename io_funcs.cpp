@@ -26,7 +26,12 @@ void assign_cli_inputs(
         exit(1);
     }
 
+#ifdef USE_SCAMAC
+    args->scamac_args = argv[1];
+#else
     *matrix_file_name = argv[1];
+#endif
+
     std::string st = argv[2];
 
     if(st == "-j"){
@@ -331,12 +336,13 @@ void postprocessing(
         summary_output(args->normed_residuals, &args->solver_type, *args->loop_params, *args->flags, args->total_time_elapsed, args->calc_time_elapsed);
     }
 
+#ifdef DEBUG_MODE_FINE
     std::cout << "The solution vector is x = [" << std::endl;
     for(int i = 0; i < args->vec_size; ++i){
         printf("%f, ", args->x_star[i]);
     }
     std::cout << "]" << std::endl;
-
+#endif
     
     //sufficent to just print to stdout for now
     // if(flags.print_residuals){

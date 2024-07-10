@@ -77,6 +77,7 @@ void subtract_vectors_cpu(
     // #pragma omp for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec1[i] - scale*vec2[i];
+        // std::cout << vec1[i] << " - " << scale << "*" << vec2[i] <<std::endl;
     }
 }
 

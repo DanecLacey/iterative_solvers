@@ -8,9 +8,12 @@ BLOCKS_PER_GRID=256
 
 DEBUG_MODE = 0
 DEBUG_MODE_FINE = 0
+OUTPUT_SPARSITY = 0
+
 USE_LIKWID = 0
 USE_EIGEN = 0
 USE_GPROF = 0
+USE_SCAMAC = 1
 
 USE_USPMV = 0
 CHUNK_SIZE = 1
@@ -77,6 +80,10 @@ ifeq ($(DEBUG_MODE_FINE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE -DDEBUG_MODE_FINE
 endif
 
+ifeq ($(OUTPUT_SPARSITY),1)
+  CXXFLAGS += -DOUTPUT_SPARSITY
+endif
+
 
 ifeq ($(USE_USPMV),1)
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
@@ -98,9 +105,24 @@ ifeq ($(USE_LIKWID),1)
   CXXFLAGS  += -DUSE_LIKWID -DLIKWID_PERFMON $(LIKWID_INC) $(LIKWID_LIB) -llikwid
 endif
 
+ifeq ($(USE_SCAMAC),1)
+  # !!! include your own file paths !!!
+  # SCAMAC_INC =
+  # SCAMAC_LIB = 
+  ifeq ($(SCAMAC_INC),)
+    $(error SCAMAC_INC selected, but no include path given in SCAMAC_INC)
+  endif
+  ifeq ($(SCAMAC_LIB),)
+    $(error SCAMAC_LIB selected, but no library path given in SCAMAC_LIB)
+  endif
+  LINK_LIBS += $(SCAMAC_LIB)
+  HEADERS += $(SCAMAC_INC)
+  CXXFLAGS += -DUSE_SCAMAC
+endif
+
 # Header-only library
 ifeq ($(USE_EIGEN),1)
-  # !!! include your own file paths !!! (I'm just loading module, which comes with file paths)
+  # !!! include your own file paths !!!
   # EIGEN_INC =
   ifeq ($(EIGEN_ROOT),)
     $(error USE_EIGEN selected, but no include path given in EIGEN_ROOT)
@@ -112,11 +134,11 @@ ifeq ($(USE_GPROF),1)
   PROFFLAGS  += -pg -fno-inline 
 endif
 
-iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
+iterative_solvers_scamac: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers_cpu
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
 endif
 
 # main only depends on funcs, mmio, and structs header, not kernels
@@ -135,11 +157,11 @@ else
 endif
 
 # funcs depends on kernels
-utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o
+utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o 
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) -x cu -c utility_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o utility_funcs.o
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o $(LINK_LIBS) $(HEADERS)
 endif
 
 # funcs depends on kernels

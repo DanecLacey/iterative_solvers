@@ -9,6 +9,7 @@
 #include "kernels.hpp"
 
 
+
 void generate_vector(
     std::vector<double> *vec_to_populate,
     int size,
@@ -113,9 +114,33 @@ void print_x(
     int n_rows
 );
 
+void extract_largest_elems(
+    const COOMtxData *coo_mat,
+    std::vector<double> *largest_elems
+);
+
+void scale_vector(    
+    double *vec_to_scale,
+    std::vector<double> *largest_elems,
+    int vec_len
+);
+
+void scale_matrix(
+    COOMtxData *coo_mat,
+    std::vector<double> *largest_elems
+);
+
 void init(
     double *vec,
     double val,
     int size
 );
+
+#ifdef USE_SCAMAC
+void scamac_make_mtx(
+    argType *args,
+    COOMtxData *coo_mat
+);
+#endif
+
 #endif /*UTILITY_FUNCS_H*/

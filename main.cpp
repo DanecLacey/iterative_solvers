@@ -48,7 +48,13 @@ int main(int argc, char *argv[]){
     assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
     COOMtxData *coo_mat = new COOMtxData;
+
+#ifdef USE_SCAMAC
+    matrix_file_name = args->scamac_args;
+    scamac_make_mtx(args, coo_mat);
+#else
     read_mtx(matrix_file_name, coo_mat);
+#endif
 
     Flags flags{
         false, // print_iters. WARNING: costly
@@ -68,7 +74,7 @@ int main(int argc, char *argv[]){
         50000, // maximum iteration count
         0.0, // init stopping criteria
         1e-13, // tolerance to stop iterations
-        21.1, // init value for b
+        0.1, // init value for b
         3.0, // init value for x
         20 // GMRES restart length
     };
