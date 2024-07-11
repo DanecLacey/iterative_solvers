@@ -175,6 +175,7 @@ void gm_iteration_ref_cpu(
     double *x,
     double beta,
     int n_rows,
+    int restart_count,
     int iter_count,
     double *residual_norm,
     int max_gmres_iters // <- temporary! only for testing
@@ -185,8 +186,12 @@ void gm_iteration_ref_cpu(
     // - The orthonormal vectors in V are stored as row vectors
 
     double tmp;
+    iter_count -= restart_count*max_gmres_iters;
 
 #ifdef DEBUG_MODE
+    // Lazy way to account for restarts
+    std::cout << "gmres solve iter_count = " << iter_count << std::endl;
+    std::cout << "gmres solve restart_count = " << restart_count << std::endl;
     // Tolerance for validation checks
     double tol=1e-14;
     int fixed_width = 12;
@@ -211,6 +216,7 @@ void gm_iteration_ref_cpu(
         for(int nz_idx = sparse_mat->crs_mat->row_ptr[row_idx]; nz_idx < sparse_mat->crs_mat->row_ptr[row_idx+1]; ++nz_idx){
             // Selects the k-th row of V (i.e. v_k) to multiply with A
             tmp += sparse_mat->crs_mat->val[nz_idx] * V[iter_count*n_rows + sparse_mat->crs_mat->col[nz_idx]];
+            // std::cout << "Accessing V[" << iter_count*n_rows + sparse_mat->crs_mat->col[nz_idx] << "]" << std::endl;
         }
         w[row_idx] = tmp;
     }
@@ -254,15 +260,18 @@ void gm_iteration_ref_cpu(
 
     // MGS
 
+#ifdef DEBUG_MODE
+    std::cout << "V" << " = [\n";
+        for(int row_idx = 0; row_idx < max_gmres_iters; ++row_idx){
+            for(int col_idx = 0; col_idx < n_rows; ++col_idx){
+                std::cout << std::setw(fixed_width);
+                std::cout << V[(n_rows*row_idx) + col_idx]  << ", ";
+            }
+            std::cout << "\n";
+        }
+    std::cout << "]" << std::endl;
+#endif
 
-// #ifdef DEBUG_MODE
-// // computed during the dot product
-//     std::cout << "H = [";
-//         for(int i = 0; i <= iter_count; ++i){
-//             std::cout << H[i] << ", ";
-//         }
-//     std::cout << "]" << std::endl;
-// #endif
 #ifdef DEBUG_MODE
     std::cout << "H" << " = [\n";
         for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
@@ -354,6 +363,18 @@ void gm_iteration_ref_cpu(
             }
         }
     }
+
+#ifdef DEBUG_MODE
+    std::cout << "H_tmp_old" << " = [\n";
+        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
+            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+                std::cout << std::setw(fixed_width);
+                std::cout << H_tmp[(max_gmres_iters*row_idx) + col_idx]  << ", ";
+            }
+            std::cout << "\n";
+        }
+    std::cout << "]" << std::endl;
+#endif
     
     if(iter_count == 0){
         // Just copies H
@@ -373,6 +394,10 @@ void gm_iteration_ref_cpu(
             for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
                 tmp = 0.0;
                 strided_2_dot(&Q[(max_gmres_iters+1)*(row_idx)], &H[col_idx], &tmp, max_gmres_iters+1, max_gmres_iters);
+                // for (int i = 0; i < (max_gmres_iters+1); ++i){
+                //     tmp += Q[row_idx*(max_gmres_iters+1) + i] * H[col_idx + i*max_gmres_iters];
+                //     std::cout << Q[row_idx*(max_gmres_iters+1)+i] << " * " << H[col_idx + i*(max_gmres_iters)] << std::endl;
+                // }
 #ifdef DEBUG_MODE
                 // Verify subdiagonal is eliminated
                 // Toggle for debugging
@@ -399,7 +424,7 @@ void gm_iteration_ref_cpu(
     }
 
 #ifdef DEBUG_MODE
-    std::cout << "H_tmp" << " = [\n";
+    std::cout << "H_tmp_new" << " = [\n";
         for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
             for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
                 std::cout << std::setw(fixed_width);
@@ -724,6 +749,8 @@ void solve_cpu(
     // Unpack relevant args
     int n_rows = args->sparse_mat->crs_mat->n_rows;
     int gmres_len = loop_params->gmres_restart_len;
+    args->restart_count = 0;
+
 
     double *x = new double[n_rows];
     double *x_new = new double[n_rows];
@@ -746,6 +773,9 @@ void solve_cpu(
 
     double residual_norm;
 
+    // bool exit_condition = residual_norm > args->loop_params->stopping_criteria && \
+    // args->loop_params->iter_count < args->loop_params->max_iters;
+
     if(args->flags->print_iters){
         iter_output(x, args->vec_size, args->loop_params->iter_count);
         printf("\n");
@@ -767,6 +797,14 @@ void solve_cpu(
     start_time(&calc_time_start);
 
     do{
+#ifdef DEBUG_MODE
+        std::cout << "Restarted GMRES inputting the x vector [" << std::endl;
+        for(int i = 0; i < n_rows; ++i){
+            std::cout << x[i] << std::endl;
+        }
+        std::cout << "]" << std::endl;
+#endif
+
         // TODO: change to solver class methods
         if(args->solver_type == "jacobi"){
             // For a reference solution, not meant for use with USpMV library
@@ -795,6 +833,7 @@ void solve_cpu(
                 x,
                 args->beta,
                 args->vec_size,
+                args->restart_count,
                 args->loop_params->iter_count,
                 &residual_norm,
                 gmres_len
@@ -802,8 +841,12 @@ void solve_cpu(
         }
 
         // Record residual every "residual_check_len" iterations
-        if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0)
+        if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0){
+            if(args->solver_type == "gmres"){
+                gmres_get_x(args->R, args->g, x, x_old, args->V, sparse_mat->crs_mat->n_rows, args->restart_count, args->loop_params->iter_count, gmres_len);
+            }
             record_residual_norm(args, flags, sparse_mat, &residual_norm, r, x, b, x_new, tmp);
+        }
 
         if(flags->print_iters)
             print_x(args, x, x_new, x_old, n_rows);  
@@ -811,14 +854,78 @@ void solve_cpu(
         // Need to swap arrays every iteration in the case of Jacobi solver
         if(args->solver_type == "jacobi")
             std::swap(x_new, x_old);
-    
+
+#ifdef DEBUG_MODE
+        std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
+#endif 
+        if(residual_norm <= args->loop_params->stopping_criteria || \
+            args->loop_params->iter_count >= args->loop_params->max_iters){
+                
+        }
+        else if ( (args->loop_params->iter_count+1) % args->gmres_restart_len == 0 ){
+            // Restart GMRES
+#ifdef DEBUG_MODE
+            std::cout << "RESTART GMRES" << std::endl;
+#endif
+            gmres_get_x(args->R, args->g, x, x_old, args->V, sparse_mat->crs_mat->n_rows, args->restart_count, args->loop_params->iter_count, gmres_len);
+            // Q: are you getting the right x here?
+            calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->vec_size);
+#ifdef DEBUG_MODE
+            printf("restart residual = [");
+            for(int i = 0; i < args->vec_size; ++i){
+                std::cout << args->r[i] << ",";
+            }
+            printf("]\n");
+#endif
+            args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);  
+#ifdef DEBUG_MODE
+            std::cout << "Restarted Beta = " << args->beta << std::endl;          
+
+            std::cout << "init_v before = [";
+                for(int i = 0; i < n_rows; ++i){
+                    std::cout << args->init_v[i] << ", ";
+                }
+            std::cout << "]" << std::endl;
+#endif
+            scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+#ifdef DEBUG_MODE
+            std::cout << "init_v after = [";
+                for(int i = 0; i < n_rows; ++i){
+                    std::cout << args->init_v[i] << ", ";
+                }
+            std::cout << "]" << std::endl;
+#endif
+            double norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
+
+#ifdef DEBUG_MODE
+            printf("restarted norm(initial residual) = %f\n", norm_r0);
+#endif
+
+            // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+            init_gmres_structs(args, n_rows);
+            ++args->restart_count;
+#ifdef DEBUG_MODE
+            std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
+            for(int i = 0; i < n_rows; ++i){
+                std::cout << x[i] << std::endl;
+            }
+            std::cout << "]" << std::endl;
+#endif
+
+            // Need deep copy TODO: rethink and do better
+            for(int i = 0; i < n_rows; ++i){
+                x_old[i] = x[i];
+            }
+
+        }
+
         ++args->loop_params->iter_count;
 
-    } while(
-        // args->loop_params->iter_count < n_rows &&
-        residual_norm > args->loop_params->stopping_criteria && 
-        args->loop_params->iter_count < args->loop_params->max_iters
-    );
+
+        // std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
+
+    } while(residual_norm > args->loop_params->stopping_criteria && \
+    args->loop_params->iter_count < args->loop_params->max_iters);
 
     args->flags->convergence_flag = (residual_norm <= args->loop_params->stopping_criteria) ? true : false;
 
@@ -843,23 +950,23 @@ void solve_cpu(
     
     // Record final residual with approximated solution vector x_star
     if(args->solver_type == "gmres")
-        gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, sparse_mat->crs_mat->n_rows, args->loop_params->iter_count - 1, gmres_len);
+        gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, sparse_mat->crs_mat->n_rows, args->restart_count, args->loop_params->iter_count - 1, gmres_len);
 
     record_residual_norm(args, flags, sparse_mat, &residual_norm, r, args->x_star, b, args->x_star, tmp);
 
-// #ifdef USE_USPMV
-//     // Bring final result vector out of permuted space
-//     double *x_star_perm = new double[args->vec_size];
-//     apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+#ifdef USE_USPMV
+    // Bring final result vector out of permuted space
+    double *x_star_perm = new double[args->vec_size];
+    apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
 
-//     // Deep copy, so you can free memory
-//     // TODO: wrap in func
-//     for(int i = 0; i < args->vec_size; ++i){
-//         args->x_star[i] = x_star_perm[i];
-//     }
+    // Deep copy, so you can free memory
+    // TODO: wrap in func
+    for(int i = 0; i < args->vec_size; ++i){
+        args->x_star[i] = x_star_perm[i];
+    }
 
-//     delete x_star_perm;
-// #endif
+    delete x_star_perm;
+#endif
 
     delete x;
     delete x_new;

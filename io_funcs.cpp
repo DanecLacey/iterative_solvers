@@ -30,6 +30,9 @@ void assign_cli_inputs(
     args->scamac_args = argv[1];
 #else
     *matrix_file_name = argv[1];
+    // if(fn.substr(matrix_file_name->find_last_of(".") + 1) == "mtx")
+    //     printf("ERROR: assign_cli_inputs: Verify you are using an .mtx file. \n");
+    // exit(1);
 #endif
 
     std::string st = argv[2];

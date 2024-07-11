@@ -102,13 +102,13 @@ void scale(
     const double scalar,
     int N
 ){
-    std::cout << "Inside of scale" << std::endl;
     // #pragma omp parallel for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec[i] * scalar;
-// #ifdef DEBUG_MODE_FINE
+#ifdef DEBUG_MODE_FINE
+        std::cout << "scaling" << std::endl;
         std::cout << result_vec[i] << " = " << vec[i] << " * " << scalar << std::endl;
-// #endif
+#endif
     }
 }
 
@@ -443,6 +443,7 @@ double euclidean_vec_norm_cpu(
     #pragma omp parallel for reduction(+:tmp)
     for(int i = 0; i < N; ++i){
         tmp += vec[i] * vec[i];
+        // std::cout << "vec[" << i << "] = " << vec[i] << std::endl;
     }
 
     return std::sqrt(tmp);

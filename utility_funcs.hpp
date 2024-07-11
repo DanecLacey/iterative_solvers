@@ -75,6 +75,7 @@ void gmres_get_x(
     double *x_0,
     double *V,
     int n_rows,
+    int restart_count,
     int iter_count,
     int max_gmres_iters
 );

@@ -65,6 +65,7 @@ void gm_iteration_ref_cpu(
     double *x,
     double beta,
     int n_rows,
+    int restart_count,
     int iter_count,
     double *residual_norm,
     int max_gmres_iters // <- temporary! only for testing

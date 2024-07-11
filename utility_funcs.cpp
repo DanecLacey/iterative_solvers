@@ -336,16 +336,30 @@ void gmres_get_x(
     double *x_0,
     double *V,
     int n_rows,
+    int restart_count,
     int iter_count,
     int max_gmres_iters
 ){
-    double *y = new double[max_gmres_iters];
-    init(y, 0.0, max_gmres_iters);
-    double *Vy = new double[n_rows];
-    init(Vy, 0.0, n_rows);
+    // double *y = new double[max_gmres_iters];
+    // init(y, 0.0, max_gmres_iters);
+    // double *Vy = new double[n_rows];
+    // init(Vy, 0.0, n_rows);
+    std::vector<double> y(max_gmres_iters, 0.0);
+    std::vector<double> Vy(n_rows, 0.0);
 
     double diag_elem = 0.0;
     double sum;
+
+    // Adjust for restarting
+    iter_count -= restart_count*max_gmres_iters;
+
+#ifdef DEBUG_MODE
+    // Lazy way to account for restarts
+    std::cout << "gmres_get_x iter_count = " << iter_count << " -> ";
+    // ^ To get around weird "iter-1" problem for now
+    std::cout << "gmres_get_x iter_count = " << iter_count << std::endl;
+    std::cout << "gmres_get_x restart_count = " << restart_count << std::endl;
+#endif
 
     // Could probably optimize col_idxs/2
     // Can only solve first "iter_count+1 rows"
@@ -394,7 +408,9 @@ void gmres_get_x(
             
         }
         y[row_idx] = (g[row_idx] - sum) / diag_elem;
-        // std::cout << g[row_idx] << " - " << sum << " / " << diag_elem << std::endl; 
+#ifdef DEBUG_MODE_FINE
+        std::cout << g[row_idx] << " - " << sum << " / " << diag_elem << std::endl; 
+#endif
     }
 
 #ifdef DEBUG_MODE
@@ -408,7 +424,7 @@ void gmres_get_x(
     // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
     for(int col_idx = 0; col_idx < n_rows; ++col_idx){
         double tmp = 0.0;
-        strided_1_dot(&V[col_idx], y, &tmp, max_gmres_iters, n_rows);
+        strided_1_dot(&V[col_idx], &y[0], &tmp, max_gmres_iters, n_rows);
         // for (int i = 0; i < max_gmres_iters; ++i){
         //     tmp += V[i*n_rows + col_idx] * y[i];
         //     // std::cout << V[i*n_rows + col_idx] << " * " << y[i] << std::endl; 
@@ -430,8 +446,8 @@ void gmres_get_x(
         // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
     }
 
-    delete y;
-    delete Vy;
+    // delete y;
+    // delete Vy;
 }
 
 void init_gmres_structs(
@@ -440,45 +456,46 @@ void init_gmres_structs(
 ){
     int restart_len = args->gmres_restart_len;
         
-        init(args->V, 0.0, n_rows * restart_len);
-        // Give v0 to first row of V
-        for(int i = 0; i < n_rows; ++i){
-            args->V[i] = args->init_v[i];
-        }
-        
-        init(args->H, 0.0, restart_len * (restart_len+1));
-        
-        init(args->R, 0.0, restart_len * (restart_len+1));
+    init(args->V, 0.0, n_rows * (restart_len+1));
 
-        // TODO: wrap up in something cleaner
-        // Initialize 1s in identity matrix
-        for(int i = 0; i <= restart_len; ++i){
-            for (int j = 0; j < restart_len; ++j){
-                if(i == j){
-                    args->R[i*(restart_len+1) + j] = 1.0;
-                }
+    // Give v0 to first row of V
+    for(int i = 0; i < n_rows; ++i){
+        args->V[i] = args->init_v[i];
+    }
+    
+    init(args->H, 0.0, restart_len * (restart_len+1));
+    
+    init(args->R, 0.0, restart_len * (restart_len+1));
+
+    // TODO: wrap up in something cleaner
+    // Initialize 1s in identity matrix
+    for(int i = 0; i <= restart_len; ++i){
+        for (int j = 0; j < restart_len; ++j){
+            if(i == j){
+                args->R[i*(restart_len+1) + j] = 1.0;
             }
         }
-        
-        init(args->Q, 0.0, (restart_len+1) * (restart_len+1));
-        init(args->Q_copy, 0.0, (restart_len+1) * (restart_len+1));
+    }
+    
+    init(args->Q, 0.0, (restart_len+1) * (restart_len+1));
+    init(args->Q_copy, 0.0, (restart_len+1) * (restart_len+1));
 
-        // TODO: wrap up in something cleaner
-        // Initialize 1s in identity matrix
-        for(int i = 0; i <= restart_len; ++i){
-            for (int j = 0; j <= restart_len; ++j){
-                if(i == j){
-                    args->Q[i*(restart_len+1) + j] = 1.0;
-                    args->Q_copy[i*(restart_len+1) + j] = 1.0;
-                }
+    // TODO: wrap up in something cleaner
+    // Initialize 1s in identity matrix
+    for(int i = 0; i <= restart_len; ++i){
+        for (int j = 0; j <= restart_len; ++j){
+            if(i == j){
+                args->Q[i*(restart_len+1) + j] = 1.0;
+                args->Q_copy[i*(restart_len+1) + j] = 1.0;
             }
         }
+    }
 
-        init(args->g, 0.0, restart_len+1);
-        args->g[0] = args->beta; // <- supply starting element
-        
-        init(args->g_copy, 0.0, restart_len+1);
-        args->g_copy[0] = args->beta; // <- supply starting element
+    init(args->g, 0.0, restart_len+1);
+    args->g[0] = args->beta; // <- supply starting element
+    
+    init(args->g_copy, 0.0, restart_len+1);
+    args->g_copy[0] = args->beta; // <- supply starting element
 }
 
 void record_residual_norm(
@@ -506,7 +523,14 @@ void record_residual_norm(
         // NOTE: While not needed for GMRES in theory, it is helpful to compare
         // a computed residual with g[-1] when debugging 
         calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
+        for(int i = 0; i < args->vec_size; ++i){
+            // std::cout << "outer_r[" << i << "] = "<< r[i] << std::endl;
+        }
         *residual_norm = euclidean_vec_norm_cpu(r, args->vec_size);
+#ifdef DEBUG_MODE
+        std::cout << "computed residual_norm = " << *residual_norm << std::endl;
+#endif
+        // exit(0);
     }
     
     args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
@@ -540,7 +564,7 @@ void print_x(
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
     if(args->solver_type == "gmres"){
-        gmres_get_x(args->R, args->g, x, x_old, args->V, n_rows, args->loop_params->iter_count, args->gmres_restart_len);
+        gmres_get_x(args->R, args->g, x, x_old, args->V, n_rows, args->restart_count, args->loop_params->iter_count, args->gmres_restart_len);
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
 }
@@ -736,13 +760,17 @@ void preprocessing(
         // args->beta = infty_vec_norm_cpu(args->r, args->vec_size);
         args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);
 #ifdef DEBUG_MODE
+        std::cout << "Beta = " << args->beta << std::endl;
+#endif  
+
+#ifdef DEBUG_MODE
     std::cout << "init_v = [";
         for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
             std::cout << args->init_v[i] << ", ";
         }
     std::cout << "]" << std::endl;
 #endif
-        // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
 #ifdef DEBUG_MODE
     std::cout << "init_v = [";
         for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
@@ -764,20 +792,18 @@ void preprocessing(
 
     if(args->solver_type == "gmres"){
         norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
-        args->loop_params->stopping_criteria = args->loop_params->tol * euclidean_vec_norm_cpu(args->r, args->vec_size); 
     }
     else{
         norm_r0 = infty_vec_norm_cpu(args->r, args->vec_size);
-        // std::cout << "norm_r0 = " << norm_r0 << std::endl; 
-        args->loop_params->stopping_criteria = args->loop_params->tol * infty_vec_norm_cpu(args->r, args->vec_size); 
-        // std::cout << "stopping_criteria = " << args->loop_params->stopping_criteria << std::endl;
-        // exit(0);
     }
+    args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
+
 
 
 #ifdef DEBUG_MODE
     printf("norm(initial residual) = %f\n", norm_r0);
-    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
+    // printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
+    std::cout << "stopping criteria = " << args->loop_params->tol <<  " * " <<  norm_r0 << " = " << args->loop_params->stopping_criteria << std::endl;
 #endif
 
 // #ifdef __CUDACC__

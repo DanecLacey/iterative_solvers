@@ -430,6 +430,7 @@ struct argType {
     double calc_time_elapsed;
     double total_time_elapsed;
     int vec_size;
+    int restart_count;
     int gmres_restart_len;
 
 #ifdef __CUDACC__

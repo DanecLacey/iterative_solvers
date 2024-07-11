@@ -71,15 +71,14 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        50000, // maximum iteration count
+        5000, // maximum iteration count
         0.0, // init stopping criteria
         1e-13, // tolerance to stop iterations
         0.1, // init value for b
         3.0, // init value for x
-        20 // GMRES restart length
+        50 // GMRES restart length
     };
 
-    
     SparseMtxFormat *sparse_mat = new SparseMtxFormat;
 
     args->vec_size = coo_mat->n_cols;
@@ -104,13 +103,13 @@ int main(int argc, char *argv[]){
     double *g_copy; 
 
     if(args->solver_type == "gmres"){
-        std::cout << "Allocating space" << std::endl;
+        std::cout << "Allocating space for GMRES structs" << std::endl;
         double *init_v = new double[args->vec_size];
-        double *V = new double[sparse_mat->crs_mat->n_rows * loop_params.gmres_restart_len]; // (m x n)
+        double *V = new double[args->vec_size * (loop_params.gmres_restart_len+1)]; // (m x n)
         double *H = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m) 
         double *H_tmp = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m)
         double *J = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)];
-        double *R = new double[loop_params.gmres_restart_len * (loop_params.gmres_restart_len+1)];
+        double *R = new double[loop_params.gmres_restart_len * (loop_params.gmres_restart_len+1)]; // (m+1 x m)
         double *Q = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
         double *Q_copy = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
         double *g = new double[loop_params.gmres_restart_len+1];
