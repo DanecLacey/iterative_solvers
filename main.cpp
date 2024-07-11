@@ -81,7 +81,7 @@ int main(int argc, char *argv[]){
         1e-13, // tolerance to stop iterations
         0.1, // init value for b
         3.0, // init value for x
-        5 // GMRES restart length
+        15 // GMRES restart length
     };
 ////////////////////////////////////////////////
 

@@ -129,6 +129,13 @@ void init(
     int size
 );
 
+void init_identity(
+    double *mat,
+    double val,
+    int n_rows,
+    int n_cols
+);
+
 #ifdef USE_SCAMAC
 void scamac_make_mtx(
     argType *args,
@@ -146,6 +153,10 @@ void gmres_allocate_structs(
 
 #ifdef __CUDACC__
 void gpu_allocate_structs(
+    argType *args
+);
+
+void gpu_copy_structs(
     argType *args
 );
 #endif

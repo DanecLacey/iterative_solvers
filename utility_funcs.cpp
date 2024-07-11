@@ -36,6 +36,26 @@ void init(
     }
 }
 
+void init_identity(
+    double *mat,
+    double val,
+    int n_rows,
+    int n_cols
+){
+    // TODO: validate first touch policy?
+    #pragma omp parallel for
+    for(int i = 0; i < n_rows; ++i){
+        for(int j = 0; j < n_cols; ++j){
+            if(i == j){
+                mat[n_cols*i + j] = 1.0;
+            }
+            else{
+                mat[n_cols*i + j] = 0.0;
+            }
+        }
+    }
+}
+
 void generate_vector(
     double *vec_to_populate,
     int size,
@@ -465,31 +485,11 @@ void init_gmres_structs(
     
     init(args->H, 0.0, restart_len * (restart_len+1));
     
-    init(args->R, 0.0, restart_len * (restart_len+1));
-
-    // TODO: wrap up in something cleaner
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= restart_len; ++i){
-        for (int j = 0; j < restart_len; ++j){
-            if(i == j){
-                args->R[i*(restart_len+1) + j] = 1.0;
-            }
-        }
-    }
+    init_identity(args->R, 0.0, restart_len, (restart_len+1));
     
-    init(args->Q, 0.0, (restart_len+1) * (restart_len+1));
-    init(args->Q_copy, 0.0, (restart_len+1) * (restart_len+1));
+    init_identity(args->Q, 0.0, (restart_len+1), (restart_len+1));
 
-    // TODO: wrap up in something cleaner
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= restart_len; ++i){
-        for (int j = 0; j <= restart_len; ++j){
-            if(i == j){
-                args->Q[i*(restart_len+1) + j] = 1.0;
-                args->Q_copy[i*(restart_len+1) + j] = 1.0;
-            }
-        }
-    }
+    init_identity(args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
 
     init(args->g, 0.0, restart_len+1);
     args->g[0] = args->beta; // <- supply starting element
@@ -707,12 +707,7 @@ void preprocessing(
     convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
     
 #ifdef __CUDACC__
-    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
-    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
-    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
-    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
+    gpu_allocate_copy_sparse_mat(args);
 #endif
 
     extract_diag(args->coo_mat, args->D);
@@ -755,14 +750,7 @@ void preprocessing(
 #endif
 
 #ifdef __CUDACC__
-    // NOTE: Really only need to copy x_old, D, and b data, as all other host vectors are just zero at this point?
-    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    gpu_copy_structs(args);
 #endif
 
     // Precalculate stopping criteria
@@ -770,27 +758,18 @@ void preprocessing(
     calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->vec_size);
 
     if(args->solver_type == "gmres"){
-        // args->beta = infty_vec_norm_cpu(args->r, args->vec_size);
         args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);
-#ifdef DEBUG_MODE
-        std::cout << "Beta = " << args->beta << std::endl;
-#endif  
+        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
 
 #ifdef DEBUG_MODE
-    std::cout << "init_v = [";
-        for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
-            std::cout << args->init_v[i] << ", ";
-        }
-    std::cout << "]" << std::endl;
+        std::cout << "Beta = " << args->beta << std::endl;
+        std::cout << "init_v = [";
+            for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
+                std::cout << args->init_v[i] << ", ";
+            }
+        std::cout << "]" << std::endl;
 #endif
-        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
-#ifdef DEBUG_MODE
-    std::cout << "init_v = [";
-        for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
-            std::cout << args->init_v[i] << ", ";
-        }
-    std::cout << "]" << std::endl;
-#endif
+
     }
 
 #ifdef DEBUG_MODE
@@ -812,10 +791,9 @@ void preprocessing(
     args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
 
 
-
 #ifdef DEBUG_MODE
     printf("norm(initial residual) = %f\n", norm_r0);
-    // printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
+    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
     std::cout << "stopping criteria = " << args->loop_params->tol <<  " * " <<  norm_r0 << " = " << args->loop_params->stopping_criteria << std::endl;
 #endif
 
@@ -1097,6 +1075,29 @@ void gpu_allocate_structs(
     cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
     cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
     cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
+}
+
+void gpu_allocate_copy_sparse_mat(
+    argType *args
+){
+    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
+    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
+    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
+    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
+}
+
+void gpu_copy_structs(
+    argType *args
+){
+    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
 }
 
 #endif

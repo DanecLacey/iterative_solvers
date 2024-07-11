@@ -178,15 +178,12 @@ void gm_iteration_ref_cpu(
     int restart_count,
     int iter_count,
     double *residual_norm,
-    int max_gmres_iters // <- temporary! only for testing
+    int restart_len
 ){
     // NOTES:
-    // - for temporary "per iteration" arrays, new vectors are used each iteration.
-    //   It is probably better to allocate space during preprocessing, and just use that repeatedly.
     // - The orthonormal vectors in V are stored as row vectors
 
-    double tmp;
-    iter_count -= restart_count*max_gmres_iters;
+    iter_count -= restart_count*restart_len;
 
 #ifdef DEBUG_MODE
     // Lazy way to account for restarts
@@ -197,29 +194,9 @@ void gm_iteration_ref_cpu(
     int fixed_width = 12;
 #endif
 
-    // double *Q_copy = new double[(max_gmres_iters+1) * (max_gmres_iters+1)]; // (m+1 x m+1)
-    // init(Q_copy, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1));
-
-    // // reset Q_copyInitialize 1s in identity matrix
-    // for(int i = 0; i <= max_gmres_iters; ++i){
-    //     for (int j = 0; j <= max_gmres_iters; ++j){
-    //         if(i == j){
-    //             Q_copy[i*(max_gmres_iters+1) + j] = 1.0;
-    //         }
-    //     }
-    // }
-
-    ///////////////////// Orthogonalization Step /////////////////////
-    // Compute w_k = A*v_k (SpMV)
-    for(int row_idx = 0; row_idx < n_rows; ++row_idx){
-        tmp = 0.0;
-        for(int nz_idx = sparse_mat->crs_mat->row_ptr[row_idx]; nz_idx < sparse_mat->crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-            // Selects the k-th row of V (i.e. v_k) to multiply with A
-            tmp += sparse_mat->crs_mat->val[nz_idx] * V[iter_count*n_rows + sparse_mat->crs_mat->col[nz_idx]];
-            // std::cout << "Accessing V[" << iter_count*n_rows + sparse_mat->crs_mat->col[nz_idx] << "]" << std::endl;
-        }
-        w[row_idx] = tmp;
-    }
+    ///////////////////// SpMV Step /////////////////////
+    // w_k = A*v_k (SpMV)
+    spmv_crs_cpu(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
@@ -229,26 +206,21 @@ void gm_iteration_ref_cpu(
     std::cout << "]" << std::endl;
 #endif
 
-    // Orthogonalize
-    // TODO: improve with MGS
-    // NOTE: One column of H filled up at a time
-    // I believe this would have to be entered on first pass through to get upper left diagonal element
-    // for(int j = 0; j <= iter_count; ++j){
-    //     dot(w, &V[j*n_rows], &H[iter_count*max_gmres_iters + j] , n_rows); // h_ij <- (w,v)
-    //     subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count*max_gmres_iters + j]); // w <- w - h_ij*v
-    // }
+    ///////////////////// Orthogonalization Step /////////////////////
 
     // TODO: This will be very bad for performance. Need a tranposed version for subtract
-    // GS
+    // For all v \in V
     for(int j = 0; j <= iter_count; ++j){
-        dot(w, &V[j*n_rows], &H[iter_count + j*max_gmres_iters] , n_rows); // h_ij <- (w,v)
-        // subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count*max_gmres_iters + j]); // w <- w - h_ij*v
+        // h_ij <- (w,v)
+        dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows); 
+
 #ifdef DEBUG_MODE
-        std::cout << "h_" << j << "_" << iter_count << " = " << H[iter_count + j*max_gmres_iters] << std::endl;
+        std::cout << "h_" << j << "_" << iter_count << " = " << H[iter_count + j*restart_len] << std::endl;
 #endif
-        for(int i = 0; i < n_rows; ++i){
-            w[i] = w[i] - H[iter_count + j*max_gmres_iters]*V[j*n_rows + i];
-        }
+
+        // w_j <- w_j - h_ij*v_k
+        subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+
 #ifdef DEBUG_MODE
         std::cout << "adjusted_w_" << j << "_rev  = [";
             for(int i = 0; i < n_rows; ++i){
@@ -258,11 +230,10 @@ void gm_iteration_ref_cpu(
 #endif
     }
 
-    // MGS
 
 #ifdef DEBUG_MODE
     std::cout << "V" << " = [\n";
-        for(int row_idx = 0; row_idx < max_gmres_iters; ++row_idx){
+        for(int row_idx = 0; row_idx < restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < n_rows; ++col_idx){
                 std::cout << std::setw(fixed_width);
                 std::cout << V[(n_rows*row_idx) + col_idx]  << ", ";
@@ -272,27 +243,15 @@ void gm_iteration_ref_cpu(
     std::cout << "]" << std::endl;
 #endif
 
-#ifdef DEBUG_MODE
-    std::cout << "H" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-                std::cout << std::setw(fixed_width);
-                std::cout << H[(max_gmres_iters*row_idx) + col_idx]  << ", ";
-            }
-            std::cout << "\n";
-        }
-    std::cout << "]" << std::endl;
-#endif
-
     // Save norm to Hessenberg matrix subdiagonal H[k+1,k]
-    H[(iter_count+1)*max_gmres_iters + iter_count] = euclidean_vec_norm_cpu(w, n_rows);
+    H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w, n_rows);
 
 #ifdef DEBUG_MODE
     std::cout << "H" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H[(max_gmres_iters*row_idx) + col_idx]  << ", ";
+                std::cout << H[(restart_len*row_idx) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -300,7 +259,7 @@ void gm_iteration_ref_cpu(
 #endif
 
     // Normalize the new orthogonal vector v <- v/H[k+1,k]
-    scale(&V[(iter_count+1)*n_rows], w, 1.0/H[(iter_count+1)*max_gmres_iters + iter_count], n_rows);
+    scale(&V[(iter_count+1)*n_rows], w, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
 
 #ifdef DEBUG_MODE
     std::cout << "v_" << iter_count+1 << " = [";
@@ -333,43 +292,21 @@ void gm_iteration_ref_cpu(
     }
 #endif
 
-// Just check orthog for now
-// exit(1);
-
     ///////////////////// Least Squares Step /////////////////////
 
     // Per-iteration "local" Givens rotation (m+1 x m+1) matrix
-    init(J, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1)); 
-
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= max_gmres_iters; ++i){
-        for (int j = 0; j <= max_gmres_iters; ++j){
-            if(i == j){
-                J[i*(max_gmres_iters+1) + j] = 1.0;
-            }
-        }
-    }
+    init_identity(J, 0.0, (restart_len+1), (restart_len+1)); 
 
     // The effect all of rotations so far upon the (k+1 x k) Hesseberg matrix
     // (except we store as row vectors, for pointer reasons...)
-    // TODO: Maybe simpler to just allocate same memory as H for now? Although very unnecessary
-    init(H_tmp, 0.0, (max_gmres_iters+1) * max_gmres_iters); 
-    
-    // Initialize 1s in identity matrix
-    for(int i = 0; i <= max_gmres_iters; ++i){
-        for (int j = 0; j <= max_gmres_iters; ++j){
-            if(i == j){
-                H_tmp[i*max_gmres_iters + j] = 1.0;
-            }
-        }
-    }
+    init_identity(H_tmp, 0.0, (restart_len+1), restart_len); 
 
 #ifdef DEBUG_MODE
     std::cout << "H_tmp_old" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H_tmp[(max_gmres_iters*row_idx) + col_idx]  << ", ";
+                std::cout << H_tmp[(restart_len*row_idx) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -379,56 +316,37 @@ void gm_iteration_ref_cpu(
     if(iter_count == 0){
         // Just copies H
         // TODO: just need to copy first column
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-                H_tmp[max_gmres_iters*row_idx + col_idx] = H[max_gmres_iters*row_idx + col_idx];
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
+                H_tmp[restart_len*row_idx + col_idx] = H[restart_len*row_idx + col_idx];
             }
         }
     }
     else{
         
         // Compute H_tmp = Q*H (dense MMM) (m+1 x m) = (m+1 x m+1)(m+1 x m)(i.e. perform all rotations on H)
-        // Could cut the indices in half+1, since only an "upper" (lower here) hessenberg matrix mult
-        // for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-                tmp = 0.0;
-                strided_2_dot(&Q[(max_gmres_iters+1)*(row_idx)], &H[col_idx], &tmp, max_gmres_iters+1, max_gmres_iters);
-                // for (int i = 0; i < (max_gmres_iters+1); ++i){
-                //     tmp += Q[row_idx*(max_gmres_iters+1) + i] * H[col_idx + i*max_gmres_iters];
-                //     std::cout << Q[row_idx*(max_gmres_iters+1)+i] << " * " << H[col_idx + i*(max_gmres_iters)] << std::endl;
+        // NOTE: Could cut the indices in half+1, since only an "upper" (lower here) hessenberg matrix mult
+        // for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
+                double tmp = 0.0;
+                strided_2_dot(&Q[(restart_len+1)*(row_idx)], &H[col_idx], &tmp, restart_len+1, restart_len);
+                // for (int i = 0; i < (restart_len+1); ++i){
+                //     tmp += Q[row_idx*(restart_len+1) + i] * H[col_idx + i*restart_len];
+                //     std::cout << Q[row_idx*(restart_len+1)+i] << " * " << H[col_idx + i*(restart_len)] << std::endl;
                 // }
-#ifdef DEBUG_MODE
-                // Verify subdiagonal is eliminated
-                // Toggle for debugging
-                // for(int tmp_row_idx = 0; tmp_row_idx <= max_gmres_iters; ++tmp_row_idx){
-                //     for(int tmp_col_idx = 0; tmp_col_idx < max_gmres_iters; ++tmp_col_idx){
-                //         if(col_idx < row_idx && col_idx < iter_count){
-                //             if(std::abs(tmp) > 0.0){
-                //                 printf("GMRES WARNING: At index (%i, %i), H_tmp has a value %.17g, \n" \
-                //                     "where is was meant to be eliminated! Forcing to 0.0.\n", row_idx, col_idx, tmp);
-                //                 tmp = 0.0;
-                //             }
-                //         }
-                //     }
-                // }
-#endif
-                H_tmp[(row_idx*max_gmres_iters) + col_idx] = tmp;
 
-#ifdef DEBUG_MODE_FINE
-                std::cout << "I'm writing: " << tmp << " to H_tmp at index: ";
-                std::cout << (row_idx*max_gmres_iters) + col_idx << std::endl;
-#endif
+                H_tmp[(row_idx*restart_len) + col_idx] = tmp;
             }
         }
     }
 
 #ifdef DEBUG_MODE
     std::cout << "H_tmp_new" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H_tmp[(max_gmres_iters*row_idx) + col_idx]  << ", ";
+                std::cout << H_tmp[(restart_len*row_idx) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -436,70 +354,40 @@ void gm_iteration_ref_cpu(
 #endif
 
     // Form Givens rotation matrix for next iteration
-    // NOTE: not forming the entire matrix, just local matrix
     // NOTE: since J is typically column accessed, need to transpose to access rows
-    // double J_denom = std::sqrt(std::pow(H_tmp[(iter_count*max_gmres_iters) + iter_count],2) + \
-    //                  std::pow(H_tmp[(iter_count+1)*max_gmres_iters + iter_count],2));
-    double J_denom = std::sqrt(std::pow(H_tmp[(iter_count*max_gmres_iters) + iter_count],2) + \
-                     std::pow(H_tmp[(iter_count+1)*max_gmres_iters + iter_count],2));
+    double J_denom = std::sqrt(std::pow(H_tmp[(iter_count*restart_len) + iter_count],2) + \
+                     std::pow(H_tmp[(iter_count+1)*restart_len + iter_count],2));
 
-    // non-transposed (not as performant(?), but easier to understand)
-    // double c_i = H_tmp[(iter_count*max_gmres_iters) + iter_count] / J_denom;
-    // double s_i = H_tmp[((iter_count+1)*max_gmres_iters) + iter_count] / J_denom;
-    double c_i = H_tmp[(iter_count*max_gmres_iters) + iter_count] / J_denom;
-    double s_i = H_tmp[((iter_count+1)*max_gmres_iters) + iter_count] / J_denom;
-
-    // std::cout << "c_i = " << c_i << std::endl;
-    // std::cout << "s_i = " << s_i << std::endl; 
+    double c_i = H_tmp[(iter_count*restart_len) + iter_count] / J_denom;
+    double s_i = H_tmp[((iter_count+1)*restart_len) + iter_count] / J_denom;
 
     // J[0][0] locally
-    J[iter_count*(max_gmres_iters+1) + iter_count] = c_i;
+    J[iter_count*(restart_len+1) + iter_count] = c_i;
     // J[0][1] locally
-    J[iter_count*(max_gmres_iters+1) + (iter_count+1)] = s_i;
+    J[iter_count*(restart_len+1) + (iter_count+1)] = s_i;
     // J[1][0] locally
-    J[(iter_count+1)*(max_gmres_iters+1) + iter_count] = -1.0 * s_i;
+    J[(iter_count+1)*(restart_len+1) + iter_count] = -1.0 * s_i;
     // J[1][1] locally
-    J[(iter_count+1)*(max_gmres_iters+1) + (iter_count+1)] = c_i;
+    J[(iter_count+1)*(restart_len+1) + (iter_count+1)] = c_i;
 
 #ifdef DEBUG_MODE
     std::cout << "J" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << J[((max_gmres_iters+1)*row_idx) + col_idx]  << ", ";
+                std::cout << J[((restart_len+1)*row_idx) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
     std::cout << "]" << std::endl;
 #endif
 
-    // transposed (use for row-wise accesses)
-    // // c_i
-    // J[0*2 + 0] = H_tmp[(iter_count*max_gmres_iters) + iter_count] / J_denom;
-    // // s_i
-    // J[1*2 + 0] = H_tmp[(iter_count*max_gmres_iters) + iter_count + 1] / J_denom;
-    // // -s_i
-    // J[0*2 + 1] = -1.0*J[1*2 + 0];
-    // // c_i
-    // J[1*2 + 1] = J[0*2 + 0];
-
-// #ifdef DEBUG_MODE
-//     std::cout << "J" << " = [\n";
-//         for(int row_idx = 0; row_idx < 2; ++row_idx){
-//             for(int col_idx = 0; col_idx < 2; ++col_idx){
-//                 std::cout << J[(2)*row_idx + col_idx]  << ", ";
-//             }
-//             std::cout << "\n";
-//         }
-//     std::cout << "]" << std::endl;
-// #endif
-
 #ifdef DEBUG_MODE
     std::cout << "old_Q" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q[(max_gmres_iters+1)*row_idx + col_idx]  << ", ";
+                std::cout << Q[(restart_len+1)*row_idx + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -508,101 +396,67 @@ void gm_iteration_ref_cpu(
 
     // Combine local Givens rotations with all previous, 
     // i.e. compute Q <- J*Q (dense MMM)
-    for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
-            tmp = 0.0;
+    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
+            double tmp = 0.0;
             // Recall, J is transposed so we can access rows here
             // We need to read and write to different Q structs to avoid conflicts
-            // strided_1_dot(&Q_copy[(max_gmres_iters+1)*(row_idx + iter_count) + iter_count], &J[col_idx], &tmp, 2, max_gmres_iters);
-            // strided_2_dot(&J[2*row_idx], &Q_copy[col_idx + (max_gmres_iters+1)*iter_count + iter_count], &tmp, 2, max_gmres_iters+1);
-            // Q[(max_gmres_iters+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
-            // Q[(max_gmres_iters+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
-            strided_2_dot(&J[row_idx*(max_gmres_iters+1)], &Q[col_idx], &tmp, max_gmres_iters+1, max_gmres_iters+1);
-            // for (int i = 0; i < (max_gmres_iters+1); ++i){
-            //     tmp += Q[row_idx*(max_gmres_iters+1) + i] * J[col_idx + i*(max_gmres_iters+1)];
-            //     std::cout << Q[row_idx*(max_gmres_iters+1)] << " * " << J[col_idx + i*(max_gmres_iters+1)] << std::endl;
+            // strided_1_dot(&Q_copy[(restart_len+1)*(row_idx + iter_count) + iter_count], &J[col_idx], &tmp, 2, restart_len);
+            // strided_2_dot(&J[2*row_idx], &Q_copy[col_idx + (restart_len+1)*iter_count + iter_count], &tmp, 2, restart_len+1);
+            // Q[(restart_len+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
+            // Q[(restart_len+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
+            strided_2_dot(&J[row_idx*(restart_len+1)], &Q[col_idx], &tmp, restart_len+1, restart_len+1);
+            // for (int i = 0; i < (restart_len+1); ++i){
+            //     tmp += Q[row_idx*(restart_len+1) + i] * J[col_idx + i*(restart_len+1)];
+            //     std::cout << Q[row_idx*(restart_len+1)] << " * " << J[col_idx + i*(restart_len+1)] << std::endl;
             // }
-            Q_copy[row_idx*(max_gmres_iters+1) + col_idx] = tmp;
+            Q_copy[row_idx*(restart_len+1) + col_idx] = tmp;
 
-
-// #ifdef DEBUG_MODE_FINE
-            // std::cout << "I'm writing: " << tmp << " to Q at index: ";
-            // std::cout << row_idx*(max_gmres_iters+1) + col_idx << std::endl;
-// #endif
         }
     }
+
     // std::swap(Q_copy, Q);
     // Q = Q_copy;
-    // Very lazy way!
-    for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
-            Q[(max_gmres_iters+1)*row_idx + col_idx] = Q_copy[(max_gmres_iters+1)*row_idx + col_idx];
+    // ^ TODO: lazy copy
+    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
+            Q[(restart_len+1)*row_idx + col_idx] = Q_copy[(restart_len+1)*row_idx + col_idx];
         }
     }
 
 #ifdef DEBUG_MODE
     std::cout << "new_Q" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q[(max_gmres_iters+1)*row_idx + col_idx]  << ", ";
+                std::cout << Q[(restart_len+1)*row_idx + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
     std::cout << "]" << std::endl;
 #endif
 
-    // reset R to identity matrix
-    // for(int i = 0; i <= max_gmres_iters; ++i){
-    //     for (int j = 0; j < max_gmres_iters; ++j){
-    //         R[i*(max_gmres_iters) + j] = 0.0;
-    //         if(i == j){
-    //             R[i*(max_gmres_iters) + j] = 1.0;
-    //         }
-    //     }
-    // }
-
     // R <- Q*H (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
-    for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-            tmp = 0.0;
-            strided_2_dot(&Q[row_idx*(max_gmres_iters+1)], &H[col_idx], &tmp, max_gmres_iters+1, max_gmres_iters);
+    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int col_idx = 0; col_idx < restart_len; ++col_idx){
+            double tmp = 0.0;
+            strided_2_dot(&Q[row_idx*(restart_len+1)], &H[col_idx], &tmp, restart_len+1, restart_len);
 
-            // for (int i = 0; i < (max_gmres_iters+1); ++i){
-            //     tmp += Q[row_idx*(max_gmres_iters+1) + i] * H[col_idx + i*max_gmres_iters];
-            //     std::cout << Q[row_idx*(max_gmres_iters+1)+i] << " * " << H[col_idx + i*(max_gmres_iters)] << std::endl;
+            // for (int i = 0; i < (restart_len+1); ++i){
+            //     tmp += Q[row_idx*(restart_len+1) + i] * H[col_idx + i*restart_len];
+            //     std::cout << Q[row_idx*(restart_len+1)+i] << " * " << H[col_idx + i*(restart_len)] << std::endl;
             // }
 
-#ifdef DEBUG_MODE
-            // Verify subdiagonal is eliminated
-            // Toggle for debugging
-            // for(int tmp_row_idx = 0; tmp_row_idx <= max_gmres_iters; ++tmp_row_idx){
-            //     for(int tmp_col_idx = 0; tmp_col_idx < max_gmres_iters; ++tmp_col_idx){
-            //         if(col_idx < row_idx){
-            //             if(std::abs(tmp) > 0.0){
-            //                 printf("GMRES WARNING: At index (%i, %i), R has a value %.17g, \n" \
-            //                     "where is was meant to be eliminated! Forcing to 0.0.\n", row_idx, col_idx, tmp);
-            //                 tmp = 0.0;
-            //             }
-            //         }
-            //     }
-            // }
-#endif
-            R[(row_idx*max_gmres_iters) + col_idx] = tmp;
-
-#ifdef DEBUG_MODE_FINE
-            std::cout << "I'm writing: " << tmp << " to R at index: ";
-            std::cout << (row_idx*max_gmres_iters) + col_idx << std::endl;
-#endif
+            R[(row_idx*restart_len) + col_idx] = tmp;
         }
     }
 
 #ifdef DEBUG_MODE
     std::cout << "R" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << R[(row_idx*max_gmres_iters) + col_idx]  << ", ";
+                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -612,106 +466,85 @@ void gm_iteration_ref_cpu(
 #ifdef DEBUG_MODE
     // Sanity check: Validate that H == Q_tR ((m+1 x m) == (m+1 x m+1)(m+1 x m))
 
-    double *Q_t = new double[(max_gmres_iters+1) * (max_gmres_iters+1)];
-    init(Q_t, 0.0, (max_gmres_iters+1) * (max_gmres_iters+1));
+    double *Q_t = new double[(restart_len+1) * (restart_len+1)];
+    init(Q_t, 0.0, (restart_len+1) * (restart_len+1));
 
-    dense_transpose(Q, Q_t, max_gmres_iters+1, max_gmres_iters+1);
+    dense_transpose(Q, Q_t, restart_len+1, restart_len+1);
 
     std::cout << "Q_t" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx <= max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q_t[(max_gmres_iters+1)*row_idx + col_idx]  << ", ";
+                std::cout << Q_t[(restart_len+1)*row_idx + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
     std::cout << "]" << std::endl;
 
-    double *Q_tR = new double[(max_gmres_iters+1) * (max_gmres_iters)];
-    init(Q_tR, 0.0, (max_gmres_iters+1) * (max_gmres_iters));
+    double *Q_tR = new double[(restart_len+1) * (restart_len)];
+    init(Q_tR, 0.0, (restart_len+1) * (restart_len));
 
-    // Compute Q_tR
-    for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+    // Compute Q_tR (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
+    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int col_idx = 0; col_idx < restart_len; ++col_idx){
             double tmp = 0.0;
-            // dot(&Q[row_idx*(max_gmres_iters+1)], &R[col_idx], &tmp, max_gmres_iters);
-            strided_2_dot(&Q_t[row_idx*(max_gmres_iters+1)], &R[col_idx], &tmp, max_gmres_iters+1, max_gmres_iters);
-            // std::cout << "I'm writing to Q_tR at index: " << (col_idx*max_gmres_iters) + row_idx << std::endl;
-            // for (int i = 0; i < max_gmres_iters; ++i){
-                // tmp += Q[row_idx*(max_gmres_iters+1) + i] * R[col_idx*max_gmres_iters + i];
-                // std::cout << Q[row_idx*(max_gmres_iters+1) + i] << " * " << R[col_idx*max_gmres_iters + i] << std::endl;
-            // }
-
-            Q_tR[(row_idx*max_gmres_iters) + col_idx] = tmp;
-#ifdef DEBUG_MODE_FINE
-            std::cout << "I'm writing: " << tmp << " to Q_tR at index: ";
-            std::cout << (row_idx*max_gmres_iters) + col_idx << std::endl;
-#endif
+            strided_2_dot(&Q_t[row_idx*(restart_len+1)], &R[col_idx], &tmp, restart_len+1, restart_len);
+            Q_tR[(row_idx*restart_len) + col_idx] = tmp;
         }
     }
 
     // Print Q_tR
     std::cout << "Q_tR" << " = [\n";
-        for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-            for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
+        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q_tR[(row_idx*max_gmres_iters) + col_idx]  << ", ";
+                std::cout << Q_tR[(row_idx*restart_len) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
     std::cout << "]" << std::endl;
 
     // Scan and validate H=Q_tR
-    for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-        for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-            int idx = row_idx*max_gmres_iters + col_idx;
+    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
+        for(int col_idx = 0; col_idx < restart_len; ++col_idx){
+            int idx = row_idx*restart_len + col_idx;
             if(std::abs(Q_tR[idx] - H[idx]) > tol){
                 printf("GMRES ERROR: The Q_tR factorization of H at index %i has a value %.17g, \n \
                     and does not have a value of %.17g as was expected.\n", \
-                    row_idx*max_gmres_iters + col_idx, Q_tR[idx], H[row_idx*max_gmres_iters + col_idx]);
+                    row_idx*restart_len + col_idx, Q_tR[idx], H[row_idx*restart_len + col_idx]);
             }
         }
     }
 #endif
-    // // Scale Givens rotations with beta (the initial residual norm)
-    // double *g_k = new double[iter_count+1];
-
-    // // Copy g vector information from previous iteration
-    // for(int i = 0; i < iter_count; ++i){
-    //     g_k[i] = g[i];
-    // }
 
 #ifdef DEBUG_MODE
     std::cout << "g_" << iter_count << " = [\n";
-    for(int i = 0; i <= max_gmres_iters; ++i){
+    for(int i = 0; i <= restart_len; ++i){
         std::cout << g[i]  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif
 
     // g_k+1 <- Q* g_k (dMVM) ((m+1 x 1) = (m+1 x m+1)(m+1 x 1))
-    init(g_copy, 0.0, max_gmres_iters+1);
+    init(g_copy, 0.0, restart_len+1);
     g_copy[0] = beta;
-    init(g, 0.0, max_gmres_iters+1);
+    init(g, 0.0, restart_len+1);
     g[0] = beta;
-    for(int row_idx = 0; row_idx < max_gmres_iters+1; ++row_idx){
-        tmp = 0.0;
-        dot(&Q[row_idx*(max_gmres_iters+1)], g, &tmp, max_gmres_iters+1);
-        // for (int i = 0; i < max_gmres_iters+1; ++i){
-        //     tmp += Q[row_idx*(max_gmres_iters+1) + i] * g[i];
-        //     std::cout << Q[row_idx*(max_gmres_iters+1) + i] << " * " << g[i] << std::endl;
-        // }
+    for(int row_idx = 0; row_idx < restart_len+1; ++row_idx){
+        double tmp = 0.0;
+        dot(&Q[row_idx*(restart_len+1)], g, &tmp, restart_len+1);
+
         g_copy[row_idx] = tmp;
     }
 
     // Very lazy !
-    for(int row_idx = 0; row_idx < max_gmres_iters+1; ++row_idx){
+    for(int row_idx = 0; row_idx < restart_len+1; ++row_idx){
         g[row_idx] = g_copy[row_idx];
     }
 
 #ifdef DEBUG_MODE
     std::cout << "g_" << iter_count+1 << " = [\n";
-    for(int i = 0; i <= max_gmres_iters; ++i){
+    for(int i = 0; i <= restart_len; ++i){
         std::cout << g[i]  << ", ";
     }
     std::cout << "]" << std::endl;
@@ -724,21 +557,10 @@ void gm_iteration_ref_cpu(
     std::cout << "residual_norm = " << *residual_norm << std::endl;
 #endif
 
-    // TODO: just allocate in preprocessing
-    // delete J;
-    // delete H_tmp;
-    // delete Q_copy;
 
 #ifdef DEBUG_MODE
     delete Q_tR;
 #endif
-    // delete g_k;
-
-    // if (iter_count == 1){
-    //    exit(1); 
-    // }
-
-    // exit(1);
 }
 
 void solve_cpu(
@@ -854,65 +676,62 @@ void solve_cpu(
 #ifdef DEBUG_MODE
         std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
 #endif 
-        if(residual_norm <= args->loop_params->stopping_criteria || \
-            args->loop_params->iter_count >= args->loop_params->max_iters){
-                
-        }
-        else if ( (args->loop_params->iter_count+1) % args->gmres_restart_len == 0 ){
-            // Restart GMRES
-#ifdef DEBUG_MODE
-            std::cout << "RESTART GMRES" << std::endl;
-#endif
-            gmres_get_x(args->R, args->g, x, x_old, args->V, args->vec_size, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
-            // Q: are you getting the right x here?
-            calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->vec_size);
-#ifdef DEBUG_MODE
-            printf("restart residual = [");
-            for(int i = 0; i < args->vec_size; ++i){
-                std::cout << args->r[i] << ",";
+        if(args->solver_type == "gmres"){
+            // Decide to restart or not 
+            if(residual_norm <= args->loop_params->stopping_criteria || \
+                args->loop_params->iter_count >= args->loop_params->max_iters){
+                    
             }
-            printf("]\n");
-#endif
-            args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);  
+            else if ( (args->loop_params->iter_count+1) % args->gmres_restart_len == 0 ){
+                // Restart GMRES
 #ifdef DEBUG_MODE
-            std::cout << "Restarted Beta = " << args->beta << std::endl;          
-
-            std::cout << "init_v before = [";
+                std::cout << "RESTART GMRES" << std::endl;
+#endif
+                gmres_get_x(args->R, args->g, x, x_old, args->V, args->vec_size, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+                // Q: are you getting the right x here?
+                calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->vec_size);
+#ifdef DEBUG_MODE
+                printf("restart residual = [");
                 for(int i = 0; i < args->vec_size; ++i){
-                    std::cout << args->init_v[i] << ", ";
+                    std::cout << args->r[i] << ",";
                 }
-            std::cout << "]" << std::endl;
+                printf("]\n");
 #endif
-            scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+                args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size); 
+                scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+    
 #ifdef DEBUG_MODE
-            std::cout << "init_v after = [";
+                std::cout << "Restarted Beta = " << args->beta << std::endl;          
+
+                std::cout << "init_v = [";
+                    for(int i = 0; i < args->vec_size; ++i){
+                        std::cout << args->init_v[i] << ", ";
+                    }
+                std::cout << "]" << std::endl;
+#endif
+                double norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
+
+#ifdef DEBUG_MODE
+                printf("restarted norm(initial residual) = %f\n", norm_r0);
+#endif
+
+                // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+                init_gmres_structs(args, args->vec_size);
+                ++args->restart_count;
+#ifdef DEBUG_MODE
+                std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
                 for(int i = 0; i < args->vec_size; ++i){
-                    std::cout << args->init_v[i] << ", ";
+                    std::cout << x[i] << std::endl;
                 }
-            std::cout << "]" << std::endl;
-#endif
-            double norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
-
-#ifdef DEBUG_MODE
-            printf("restarted norm(initial residual) = %f\n", norm_r0);
+                std::cout << "]" << std::endl;
 #endif
 
-            // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
-            init_gmres_structs(args, args->vec_size);
-            ++args->restart_count;
-#ifdef DEBUG_MODE
-            std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
-            for(int i = 0; i < args->vec_size; ++i){
-                std::cout << x[i] << std::endl;
+                // Need deep copy TODO: rethink and do better
+                for(int i = 0; i < args->vec_size; ++i){
+                    x_old[i] = x[i];
+                }
+
             }
-            std::cout << "]" << std::endl;
-#endif
-
-            // Need deep copy TODO: rethink and do better
-            for(int i = 0; i < args->vec_size; ++i){
-                x_old[i] = x[i];
-            }
-
         }
 
         ++args->loop_params->iter_count;
