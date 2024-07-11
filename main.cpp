@@ -29,8 +29,8 @@ int main(int argc, char *argv[]){
      *          x_k = D^{-1}(b - (L + U)x_{k-1})
      *      Gauss-Seidel Iteration
      *          x_k = (D+L)^{-1}(b - Ux_{k-1}) 
-     *      Conjugate Gradient (under development)
-     *      GMRES (under development)
+     *      Conjugate Gradient
+     *      GMRES(restart length)
      * until tolerance
      *      "||b - Ax_k|| / ||b - Ax_0|| < tol"
      * is reached
@@ -47,14 +47,19 @@ int main(int argc, char *argv[]){
     std::string matrix_file_name;
     assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
+    SparseMtxFormat *sparse_mat = new SparseMtxFormat;
     COOMtxData *coo_mat = new COOMtxData;
 
 #ifdef USE_SCAMAC
+    std::cout << "Generating Matrix" << std::endl;
     matrix_file_name = args->scamac_args;
     scamac_make_mtx(args, coo_mat);
 #else
+    std::cout << "Reading Matrix" << std::endl;
     read_mtx(matrix_file_name, coo_mat);
 #endif
+
+//////////////// User Parameters ////////////////
 
     Flags flags{
         false, // print_iters. WARNING: costly
@@ -71,25 +76,33 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        5000, // maximum iteration count
+        100, // maximum iteration count
         0.0, // init stopping criteria
         1e-13, // tolerance to stop iterations
         0.1, // init value for b
         3.0, // init value for x
-        50 // GMRES restart length
+        5 // GMRES restart length
     };
+////////////////////////////////////////////////
 
-    SparseMtxFormat *sparse_mat = new SparseMtxFormat;
-
+    args->loop_params = &loop_params;
+    args->flags = &flags;
+    args->matrix_file_name = &matrix_file_name;
+    args->sparse_mat = sparse_mat;
+    args->gmres_restart_len = loop_params.gmres_restart_len;
+    args->coo_mat = coo_mat;
     args->vec_size = coo_mat->n_cols;
-    double *x_star = new double[args->vec_size];
-    double *x_old = new double[args->vec_size];
-    double *x_new = new double[args->vec_size];
-    double *tmp = new double[args->vec_size];
-    double *D = new double[args->vec_size];
-    double *r = new double[args->vec_size];
-    double *b = new double[args->vec_size];
-    double *normed_residuals = new double[loop_params.max_iters / loop_params.residual_check_len + 1];
+
+    double *x_star;
+    double *x_old;
+    double *x_new;
+    double *tmp;
+    double *D;
+    double *r;
+    double *b;
+    double *normed_residuals;
+    
+    allocate_structs(args);
 
     double *init_v;
     double *V;
@@ -103,45 +116,8 @@ int main(int argc, char *argv[]){
     double *g_copy; 
 
     if(args->solver_type == "gmres"){
-        std::cout << "Allocating space for GMRES structs" << std::endl;
-        double *init_v = new double[args->vec_size];
-        double *V = new double[args->vec_size * (loop_params.gmres_restart_len+1)]; // (m x n)
-        double *H = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m) 
-        double *H_tmp = new double[(loop_params.gmres_restart_len+1) * loop_params.gmres_restart_len]; // (m+1 x m)
-        double *J = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)];
-        double *R = new double[loop_params.gmres_restart_len * (loop_params.gmres_restart_len+1)]; // (m+1 x m)
-        double *Q = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
-        double *Q_copy = new double[(loop_params.gmres_restart_len+1) * (loop_params.gmres_restart_len+1)]; // (m+1 x m+1)
-        double *g = new double[loop_params.gmres_restart_len+1];
-        double *g_copy = new double[loop_params.gmres_restart_len+1];
-
-        args->init_v = init_v;
-        args->V = V;
-        args->H = H;
-        args->H_tmp = H_tmp;
-        args->J = J;
-        args->R = R;
-        args->Q = Q;
-        args->Q_copy = Q_copy;
-        args->g = g;
-        args->g_copy = g_copy;
+        gmres_allocate_structs(args);
     }
-    
-    args->coo_mat = coo_mat;
-    args->x_star = x_star;
-    args->x_old = x_old;
-    args->x_new = x_new;
-    args->tmp = tmp;
-    args->D = D;
-    args->r = r;
-    args->b = b;
-    args->normed_residuals = normed_residuals;
-
-    args->loop_params = &loop_params;
-    args->flags = &flags;
-    args->matrix_file_name = &matrix_file_name;
-    args->sparse_mat = sparse_mat;
-    args->gmres_restart_len = loop_params.gmres_restart_len;
 
 #ifdef __CUDACC__
     // Just give pointers to args struct now, allocate on device later
@@ -169,14 +145,7 @@ int main(int argc, char *argv[]){
     args->d_b = d_b;
     args->d_normed_residuals = d_normed_residuals;
 
-    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
+    gpu_allocate_structs(args);
 #endif
 
 #ifdef USE_USPMV
@@ -196,7 +165,7 @@ int main(int argc, char *argv[]){
 
     preprocessing(args);
 
-    solve(args, &loop_params);
+    solve(args);
 
     args->total_time_elapsed = end_time(&total_time_start, &total_time_end);
 

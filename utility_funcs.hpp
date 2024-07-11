@@ -8,8 +8,6 @@
 #include "structs.hpp"
 #include "kernels.hpp"
 
-
-
 void generate_vector(
     std::vector<double> *vec_to_populate,
     int size,
@@ -25,12 +23,6 @@ double end_time(
     timeval *begin,
     timeval *end
 );
-
-
-// Do you need this anywhere??
-// double infty_mat_norm(
-//     const CRSMtxData *crs_mat
-// );
 
 void gen_neg_inv(
     std::vector<double> *neg_inv_coo_vec,
@@ -143,5 +135,20 @@ void scamac_make_mtx(
     COOMtxData *coo_mat
 );
 #endif
+
+void allocate_structs(
+    argType *args
+);
+
+void gmres_allocate_structs(
+    argType *args
+);
+
+#ifdef __CUDACC__
+void gpu_allocate_structs(
+    argType *args
+);
+#endif
+
 
 #endif /*UTILITY_FUNCS_H*/

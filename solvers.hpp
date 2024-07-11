@@ -101,13 +101,11 @@ void jacobi_iteration_sep_gpu(
 );
 
 void solve_gpu(
-    argType *args,
-    LoopParams *loop_params
+    argType *args
 );
 #endif
 
 void solve(
-    argType *args,
-    LoopParams *loop_params
+    argType *args
 );
 #endif /*SOLVERS_H*/

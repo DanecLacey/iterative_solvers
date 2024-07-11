@@ -535,8 +535,20 @@ void record_residual_norm(
     
     args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
     
-    if(!flags->convergence_flag)
+    // Only increment if we're still in the main solver loop
+    if(flags->convergence_flag){
+        // Don't increment
+    }
+    else if(args->loop_params->iter_count == args->loop_params->max_iters){
+        // Don't increment
+    }
+    else if(*residual_norm < args->loop_params->stopping_criteria){
+        // Don't increment
+    }
+    else{
         ++args->loop_params->residual_count;
+    }
+       
 }
 
 void iter_output(
@@ -620,6 +632,7 @@ void scale_matrix(
 void preprocessing(
     argType *args
 ){
+    std::cout << "Preprocessing Matrix Data" << std::endl;
     if(args->solver_type == "gauss-seidel"){
         COOMtxData *coo_L = new COOMtxData;
         COOMtxData *coo_U = new COOMtxData;
@@ -813,6 +826,57 @@ void preprocessing(
 //     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
 // #endif
 
+}
+
+void allocate_structs(
+    argType *args
+){
+    std::cout << "Allocating space for general structs" << std::endl;
+    double *x_star = new double[args->vec_size];
+    double *x_old = new double[args->vec_size];
+    double *x_new = new double[args->vec_size];
+    double *tmp = new double[args->vec_size];
+    double *D = new double[args->vec_size];
+    double *r = new double[args->vec_size];
+    double *b = new double[args->vec_size];
+    double *normed_residuals = new double[args->loop_params->max_iters / args->loop_params->residual_check_len + 1];
+
+    args->x_star = x_star;
+    args->x_old = x_old;
+    args->x_new = x_new;
+    args->tmp = tmp;
+    args->D = D;
+    args->r = r;
+    args->b = b;
+    args->normed_residuals = normed_residuals;
+}
+
+void gmres_allocate_structs(
+    argType *args
+){
+    std::cout << "Allocating space for GMRES structs" << std::endl;
+    double *init_v = new double[args->vec_size];
+    double *V = new double[args->vec_size * (args->loop_params->gmres_restart_len+1)]; // (m x n)
+    double *H = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m) 
+    double *H_tmp = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m)
+    double *J = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)];
+    double *R = new double[args->loop_params->gmres_restart_len * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m)
+    double *Q = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
+    double *Q_copy = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
+    double *g = new double[args->loop_params->gmres_restart_len+1];
+    double *g_copy = new double[args->loop_params->gmres_restart_len+1];
+
+    args->init_v = init_v;
+    args->V = V;
+    args->H = H;
+    args->H_tmp = H_tmp;
+    args->J = J;
+    args->R = R;
+    args->Q = Q;
+    args->Q_copy = Q_copy;
+    args->g = g;
+    args->g_copy = g_copy;
+    args->restart_count = 0;
 }
 
 #ifdef USE_SCAMAC
@@ -1018,4 +1082,21 @@ void scamac_make_mtx(
     coo_mat->n_cols = (std::set<int>( (coo_mat->J).begin(), (coo_mat->J).end() )).size();
     coo_mat->nnz = (coo_mat->values).size();
 }
+#endif
+
+#ifdef __CUDACC__
+
+void gpu_allocate_structs(
+    argType *args
+){
+    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
+}
+
 #endif
