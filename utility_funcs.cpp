@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <algorithm>
 #include <math.h>
-#include <sys/time.h>
 #include <cstring>
 #include <cmath>
 #include <vector>
@@ -23,6 +22,7 @@
 
 #include "kernels.hpp"
 #include "mmio.h"
+#include "structs.hpp"
 
 void init(
     double *vec,
@@ -106,23 +106,6 @@ void generate_vector(
 //     // The largest sum is the matrix infty norm
 //     return infty_vec_norm_cpu(&row_sums);
 // }
-
-
-void start_time(
-    timeval *begin
-){
-    gettimeofday(begin, 0);
-}
-
-double end_time(
-    timeval *begin,
-    timeval *end
-){
-    gettimeofday(end, 0);
-    long seconds = end->tv_sec - begin->tv_sec;
-    long microseconds = end->tv_usec - begin->tv_usec;
-    return seconds + microseconds*1e-6;
-}
 
 void recip_elems(
     std::vector<double> *recip_vec,
@@ -628,11 +611,56 @@ void scale_matrix(
     }
 };
 
+void init_gmres_timers(argType *args){
+    timeval *gmres_spmv_start = new timeval;
+    timeval *gmres_spmv_end = new timeval;
+    Stopwatch *gmres_spmv_wtime = new Stopwatch(gmres_spmv_start, gmres_spmv_end);
+    args->timers->gmres_spmv_wtime = gmres_spmv_wtime;
+
+    timeval *gmres_orthog_start = new timeval;
+    timeval *gmres_orthog_end = new timeval;
+    Stopwatch *gmres_orthog_wtime = new Stopwatch(gmres_orthog_start, gmres_orthog_end);
+    args->timers->gmres_orthog_wtime = gmres_orthog_wtime;
+
+    timeval *gmres_mgs_start = new timeval;
+    timeval *gmres_mgs_end = new timeval;
+    Stopwatch *gmres_mgs_wtime = new Stopwatch(gmres_mgs_start, gmres_mgs_end);
+    args->timers->gmres_mgs_wtime = gmres_mgs_wtime;
+
+    timeval *gmres_leastsq_start = new timeval;
+    timeval *gmres_leastsq_end = new timeval;
+    Stopwatch *gmres_leastsq_wtime = new Stopwatch(gmres_leastsq_start, gmres_leastsq_end);
+    args->timers->gmres_leastsq_wtime = gmres_leastsq_wtime;
+
+    timeval *gmres_compute_H_tmp_start = new timeval;
+    timeval *gmres_compute_H_tmp_end = new timeval;
+    Stopwatch *gmres_compute_H_tmp_wtime = new Stopwatch(gmres_compute_H_tmp_start, gmres_compute_H_tmp_end);
+    args->timers->gmres_compute_H_tmp_wtime = gmres_compute_H_tmp_wtime;
+
+    timeval *gmres_compute_Q_start = new timeval;
+    timeval *gmres_compute_Q_end = new timeval;
+    Stopwatch *gmres_compute_Q_wtime = new Stopwatch(gmres_compute_Q_start, gmres_compute_Q_end);
+    args->timers->gmres_compute_Q_wtime = gmres_compute_Q_wtime;
+
+    timeval *gmres_compute_R_start = new timeval;
+    timeval *gmres_compute_R_end = new timeval;
+    Stopwatch *gmres_compute_R_wtime = new Stopwatch(gmres_compute_R_start, gmres_compute_R_end);
+    args->timers->gmres_compute_R_wtime = gmres_compute_R_wtime;
+}
+
 // TODO: MPI preprocessing will go here
 void preprocessing(
     argType *args
 ){
     std::cout << "Preprocessing Matrix Data" << std::endl;
+    timeval preprocessing_start, preprocessing_end;
+    Stopwatch *preprocessing_wtime = new Stopwatch(&preprocessing_start, &preprocessing_end);
+    args->timers->preprocessing_wtime = preprocessing_wtime;
+    args->timers->preprocessing_wtime->start_stopwatch();
+
+    if(args->solver_type == "gmres"){
+        init_gmres_timers(args);
+    }
     if(args->solver_type == "gauss-seidel"){
         COOMtxData *coo_L = new COOMtxData;
         COOMtxData *coo_U = new COOMtxData;
@@ -804,6 +832,7 @@ void preprocessing(
 //     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
 // #endif
 
+    args->timers->preprocessing_wtime->end_stopwatch();
 }
 
 void allocate_structs(

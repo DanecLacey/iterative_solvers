@@ -15,15 +15,6 @@ void generate_vector(
     double initial_val
 );
 
-void start_time(
-    timeval *begin
-);
-
-double end_time(
-    timeval *begin,
-    timeval *end
-);
-
 void gen_neg_inv(
     std::vector<double> *neg_inv_coo_vec,
     std::vector<double> *inv_coo_vec,
@@ -80,6 +71,8 @@ void init_gmres_structs(
     argType *args,
     int n_rows
 );
+
+void init_gmres_timers(argType *args);
 
 void record_residual_norm(
     argType *args,

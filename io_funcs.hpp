@@ -19,10 +19,10 @@ void summary_output(
     double *residuals_vec,
     std::string *solver_type,
     LoopParams loop_params,
-    Flags flags,
-    double total_time_elapsed,
-    double calc_time_elapsed
+    Flags flags
 );
+
+void print_timers(Timers *timers);
 
 void residuals_output(
     bool print_residuals,

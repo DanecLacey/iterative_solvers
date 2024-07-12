@@ -51,6 +51,7 @@ void gs_iteration_ref_cpu(
 
 void gm_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
+    Timers *timers,
     double *V,
     double *H,
     double *H_tmp,

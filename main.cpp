@@ -39,11 +39,18 @@ int main(int argc, char *argv[]){
      *      Report number of iterations and validate A * x_star = b
      *      Export errors per iteration to external text file
      * */
-    struct timeval total_time_start, total_time_end;
-    start_time(&total_time_start);
 
     // Declare and init input structs
     argType *args = new argType;
+    Timers *timers = new Timers;
+    args->timers = timers;
+    
+    timeval *total_time_start = new timeval;
+    timeval *total_time_end = new timeval;
+    Stopwatch *total_wtime = new Stopwatch(total_time_start, total_time_end);
+    args->timers->total_wtime = total_wtime;
+    args->timers->total_wtime->start_stopwatch();
+
     std::string matrix_file_name;
     assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
@@ -156,6 +163,7 @@ int main(int argc, char *argv[]){
     args->sparse_mat->scs_L = scs_L;
     args->sparse_mat->scs_U = scs_U;
 #endif
+
     CRSMtxData *crs_mat = new CRSMtxData;
     CRSMtxData *crs_L = new CRSMtxData;
     CRSMtxData *crs_U = new CRSMtxData;
@@ -166,8 +174,6 @@ int main(int argc, char *argv[]){
     preprocessing(args);
 
     solve(args);
-
-    args->total_time_elapsed = end_time(&total_time_start, &total_time_end);
 
     postprocessing(args);
 

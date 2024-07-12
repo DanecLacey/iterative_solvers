@@ -5,7 +5,6 @@
 #include <iomanip>
 #include <cmath>
 
-
 void jacobi_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
     double *D,
@@ -161,6 +160,7 @@ void gs_iteration_sep_cpu(
 
 void gm_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
+    Timers *timers,
     double *V,
     double *H,
     double *H_tmp,
@@ -196,7 +196,23 @@ void gm_iteration_ref_cpu(
 
     ///////////////////// SpMV Step /////////////////////
     // w_k = A*v_k (SpMV)
+    timers->gmres_spmv_wtime->start_stopwatch();
+#ifdef USE_USPMV
+    uspmv_omp_scs_cpu<double, int>(
+        sparse_mat->scs_mat->C,
+        sparse_mat->scs_mat->n_chunks,
+        &(sparse_mat->scs_mat->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat->chunk_lengths)[0],
+        &(sparse_mat->scs_mat->col_idxs)[0],
+        &(sparse_mat->scs_mat->values)[0],
+        &V[iter_count*n_rows],
+        w
+    );
+#else
     spmv_crs_cpu(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
+#endif
+    timers->gmres_spmv_wtime->end_stopwatch();
+    // exit(1);
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
@@ -207,9 +223,11 @@ void gm_iteration_ref_cpu(
 #endif
 
     ///////////////////// Orthogonalization Step /////////////////////
+    timers->gmres_orthog_wtime->start_stopwatch();
 
     // TODO: This will be very bad for performance. Need a tranposed version for subtract
     // For all v \in V
+    timers->gmres_mgs_wtime->start_stopwatch();
     for(int j = 0; j <= iter_count; ++j){
         // h_ij <- (w,v)
         dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows); 
@@ -229,6 +247,7 @@ void gm_iteration_ref_cpu(
         std::cout << "]" << std::endl;
 #endif
     }
+    timers->gmres_mgs_wtime->end_stopwatch();
 
 
 #ifdef DEBUG_MODE
@@ -292,7 +311,11 @@ void gm_iteration_ref_cpu(
     }
 #endif
 
+    timers->gmres_orthog_wtime->end_stopwatch();
+
     ///////////////////// Least Squares Step /////////////////////
+
+    timers->gmres_leastsq_wtime->start_stopwatch();
 
     // Per-iteration "local" Givens rotation (m+1 x m+1) matrix
     init_identity(J, 0.0, (restart_len+1), (restart_len+1)); 
@@ -313,6 +336,7 @@ void gm_iteration_ref_cpu(
     std::cout << "]" << std::endl;
 #endif
     
+    timers->gmres_compute_H_tmp_wtime->start_stopwatch();
     if(iter_count == 0){
         // Just copies H
         // TODO: just need to copy first column
@@ -340,6 +364,7 @@ void gm_iteration_ref_cpu(
             }
         }
     }
+    timers->gmres_compute_H_tmp_wtime->end_stopwatch();
 
 #ifdef DEBUG_MODE
     std::cout << "H_tmp_new" << " = [\n";
@@ -396,6 +421,7 @@ void gm_iteration_ref_cpu(
 
     // Combine local Givens rotations with all previous, 
     // i.e. compute Q <- J*Q (dense MMM)
+    timers->gmres_compute_Q_wtime->start_stopwatch();
     for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
         for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
             double tmp = 0.0;
@@ -423,6 +449,7 @@ void gm_iteration_ref_cpu(
             Q[(restart_len+1)*row_idx + col_idx] = Q_copy[(restart_len+1)*row_idx + col_idx];
         }
     }
+    timers->gmres_compute_Q_wtime->end_stopwatch();
 
 #ifdef DEBUG_MODE
     std::cout << "new_Q" << " = [\n";
@@ -437,6 +464,7 @@ void gm_iteration_ref_cpu(
 #endif
 
     // R <- Q*H (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
+    timers->gmres_compute_R_wtime->start_stopwatch();
     for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
         for(int col_idx = 0; col_idx < restart_len; ++col_idx){
             double tmp = 0.0;
@@ -450,6 +478,7 @@ void gm_iteration_ref_cpu(
             R[(row_idx*restart_len) + col_idx] = tmp;
         }
     }
+    timers->gmres_compute_R_wtime->end_stopwatch();
 
 #ifdef DEBUG_MODE
     std::cout << "R" << " = [\n";
@@ -561,12 +590,14 @@ void gm_iteration_ref_cpu(
 #ifdef DEBUG_MODE
     delete Q_tR;
 #endif
+
+    timers->gmres_leastsq_wtime->end_stopwatch();
 }
 
 void solve_cpu(
     argType *args
 ){
-    std::cout << "Entering Solver" << std::endl;
+    std::cout << "Entering Solver Harness" << std::endl;
 
     double *x = new double[args->vec_size];
     double *x_new = new double[args->vec_size];
@@ -589,6 +620,7 @@ void solve_cpu(
 
     if(args->solver_type == "gmres"){
         init_gmres_structs(args, args->vec_size);
+        init_gmres_timers(args);
     }
 
 #ifdef DEBUG_MODE
@@ -597,10 +629,6 @@ void solve_cpu(
         std::cout << x[i] << std::endl;
     }
 #endif
-
-    // Begin timer
-    struct timeval calc_time_start, calc_time_end;
-    start_time(&calc_time_start);
 
     do{
 #ifdef DEBUG_MODE
@@ -611,6 +639,7 @@ void solve_cpu(
         std::cout << "]" << std::endl;
 #endif
 
+        args->timers->solver_wtime->start_stopwatch();
         // TODO: change to solver class methods
         if(args->solver_type == "jacobi"){
             // For a reference solution, not meant for use with USpMV library
@@ -637,6 +666,7 @@ void solve_cpu(
         else if(args->solver_type == "gmres"){
             gm_iteration_ref_cpu(
                 sparse_mat, 
+                args->timers,
                 args->V,
                 args->H,
                 args->H_tmp,
@@ -657,6 +687,7 @@ void solve_cpu(
                 args->loop_params->gmres_restart_len
             );
         }
+        args->timers->solver_wtime->end_stopwatch();
 
         // Record residual every "residual_check_len" iterations
         if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0){
@@ -786,9 +817,6 @@ void solve_cpu(
     delete x;
     delete x_new;
     delete x_old;
-
-    // End timer
-    args->calc_time_elapsed = end_time(&calc_time_start, &calc_time_end);
 }
 
 
@@ -1074,9 +1102,22 @@ void solve_gpu(
 void solve(
     argType *args
 ){
+    timeval *solver_harness_time_start = new timeval;
+    timeval *solver_harness_time_end = new timeval;
+    Stopwatch *solver_harness_wtime = new Stopwatch(solver_harness_time_start, solver_harness_time_end);
+    args->timers->solver_harness_wtime = solver_harness_wtime ;
+    args->timers->solver_harness_wtime->start_stopwatch();
+
+    timeval *solver_time_start = new timeval;
+    timeval *solver_time_end = new timeval;
+    Stopwatch *solver_wtime = new Stopwatch(solver_time_start, solver_time_end);
+    args->timers->solver_wtime = solver_wtime ;
+
 #ifndef __CUDACC__
     solve_cpu(args);
 #else
     solve_gpu(args);
 #endif
+
+    args->timers->solver_harness_wtime->end_stopwatch();
 }

@@ -238,10 +238,12 @@ void summary_output(
     double *residuals_vec, // Here is the problem. Why would you send the entire residuals vec??
     std::string *solver_type,
     LoopParams loop_params,
-    Flags flags,
-    double total_time_elapsed,
-    double calc_time_elapsed
+    Flags flags
 ){
+    if(flags.print_residuals){
+        residuals_output(flags.print_residuals, residuals_vec, loop_params);
+    }
+
     if(flags.convergence_flag){
         // x_new ~ A^{-1}b
         std::cout << "\n" << *solver_type << " solver converged in: " << loop_params.iter_count << " iterations." << std::endl;
@@ -250,17 +252,9 @@ void summary_output(
         // x_new !~ A^{-1}b
         std::cout << "\n" << *solver_type << " solver did not converge after " << loop_params.max_iters << " iterations." << std::endl;
     }
+    std::cout << "With the stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
     std::cout << "The residual of the final iteration is: ||A*x_star - b||_infty = " <<
     std::scientific << residuals_vec[loop_params.residual_count] << ".\n";
-    std::cout << "The stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
-    std::cout << "The total elapsed time was: " << total_time_elapsed << "[s]." << std::endl;
-    std::cout << "Out of which, the pre-processing time was: " << total_time_elapsed - calc_time_elapsed <<
-    "[s], and the computation time was: " << calc_time_elapsed << "[s]." <<std::endl;
-
-    if(flags.print_residuals){
-        residuals_output(flags.print_residuals, residuals_vec, loop_params);
-    }
-
 }
 
 void write_residuals_to_file(std::vector<double> *residuals_vec){
@@ -288,6 +282,68 @@ void write_comparison_to_file(
         out_file << "idx: " << i << ", " << (*x_star)[i] << " - " <<  (*x_direct)[i] << " = " << (*x_star)[i] - (*x_direct)[i] << "\n";
     }
     out_file.close();
+}
+
+void print_timers(argType *args){
+    long double total_wtime = args->timers->total_wtime->get_wtime();
+    long double preprocessing_wtime = args->timers->preprocessing_wtime->get_wtime();
+    long double solver_harness_wtime = args->timers->solver_harness_wtime->get_wtime();
+    long double solver_wtime = args->timers->solver_wtime->get_wtime();
+    long double spmv_wtime;
+    long double orthog_wtime; 
+    long double mgs_wtime;
+    long double leastsq_wtime;
+    long double compute_H_tmp_wtime;
+    long double compute_Q_wtime;
+    long double compute_R_wtime;
+
+    if(args->solver_type == "gmres"){
+        spmv_wtime = args->timers->gmres_spmv_wtime->get_wtime();
+        orthog_wtime = args->timers->gmres_orthog_wtime->get_wtime();
+        mgs_wtime = args->timers->gmres_mgs_wtime->get_wtime();
+        leastsq_wtime = args->timers->gmres_leastsq_wtime->get_wtime();
+        compute_H_tmp_wtime = args->timers->gmres_compute_H_tmp_wtime->get_wtime();
+        compute_Q_wtime = args->timers->gmres_compute_Q_wtime->get_wtime();
+        compute_R_wtime = args->timers->gmres_compute_R_wtime->get_wtime();
+    }
+
+    int right_flush_width = 30;
+    int left_flush_width = 25;
+
+    std::cout << "+---------------------------------------------------------+" << std::endl;
+
+    std::cout << std::left << std::setw(left_flush_width) << "Total elapsed time: " << std::right << std::setw(right_flush_width) << total_wtime  << std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "| Preprocessing time: " << std::right << std::setw(right_flush_width) << preprocessing_wtime  << std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "| Solver Harness time: " << std::right << std::setw(right_flush_width) << solver_harness_wtime  <<std::endl;
+
+    if(args->solver_type == "jacobi"){
+        std::cout << std::left << std::setw(left_flush_width) << "| | Jacobi Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
+    }
+    else if(args->solver_type == "gauss-seidel"){
+        std::cout << std::left << std::setw(left_flush_width) << "| | GS Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
+    }
+
+    if(args->solver_type == "gmres"){
+        std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "               << std::right << std::setw(right_flush_width) << spmv_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "  << std::right << std::setw(right_flush_width) << orthog_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  <<std::endl;
+        long double orthog_tmp = mgs_wtime;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "   << std::right << std::setw(right_flush_width) << leastsq_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "    << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "        << std::right << std::setw(right_flush_width) << compute_Q_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "        << std::right << std::setw(right_flush_width) << compute_R_wtime  <<std::endl;
+        long double leastsq_tmp = compute_H_tmp_wtime + compute_Q_wtime + compute_R_wtime; 
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp  <<std::endl;
+    }
+    std::cout << std::left << std::setw(left_flush_width) << "| | Other: " << std::right << std::setw(right_flush_width) << solver_harness_wtime - solver_wtime  <<std::endl;
+
+    std::cout << "+---------------------------------------------------------+" << std::endl;
+
+    // Validate timers
+    // long double timer_sum = 0.0;
+    // timer_sum += preprocessing_wtime;
 }
 
 void postprocessing(
@@ -335,9 +391,19 @@ void postprocessing(
     //     compare_with_direct(crs_mat, matrix_file_name, loop_params, x_star, (*normed_residuals)[loop_params.residual_count]);
     // }
 
+    args->timers->total_wtime->end_stopwatch();
+    // std::cout << "TOTAL TIME ELAPSED: " << args->timers->total_wtime->get_wtime() << std::endl;
+
     if(args->flags->print_summary){
-        summary_output(args->normed_residuals, &args->solver_type, *args->loop_params, *args->flags, args->total_time_elapsed, args->calc_time_elapsed);
+        summary_output(
+            args->normed_residuals, 
+            &args->solver_type, 
+            *args->loop_params, 
+            *args->flags
+        );
     }
+
+    print_timers(args);
 
 #ifdef DEBUG_MODE_FINE
     std::cout << "The solution vector is x = [" << std::endl;
