@@ -197,6 +197,8 @@ void gm_iteration_ref_cpu(
     ///////////////////// SpMV Step /////////////////////
     // w_k = A*v_k (SpMV)
     timers->gmres_spmv_wtime->start_stopwatch();
+    #pragma parallel
+    {
 #ifdef USE_USPMV
     uspmv_omp_scs_cpu<double, int>(
         sparse_mat->scs_mat->C,
@@ -211,6 +213,7 @@ void gm_iteration_ref_cpu(
 #else
     spmv_crs_cpu(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
 #endif
+    }
     timers->gmres_spmv_wtime->end_stopwatch();
     // exit(1);
 
@@ -230,14 +233,18 @@ void gm_iteration_ref_cpu(
     timers->gmres_mgs_wtime->start_stopwatch();
     for(int j = 0; j <= iter_count; ++j){
         // h_ij <- (w,v)
-        dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows); 
+        timers->gmres_mgs_dot_wtime->start_stopwatch();
+        dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+        timers->gmres_mgs_dot_wtime->end_stopwatch(); 
 
 #ifdef DEBUG_MODE
         std::cout << "h_" << j << "_" << iter_count << " = " << H[iter_count + j*restart_len] << std::endl;
 #endif
 
         // w_j <- w_j - h_ij*v_k
+        timers->gmres_mgs_sub_wtime->start_stopwatch();
         subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+        timers->gmres_mgs_sub_wtime->end_stopwatch();
 
 #ifdef DEBUG_MODE
         std::cout << "adjusted_w_" << j << "_rev  = [";
@@ -347,22 +354,9 @@ void gm_iteration_ref_cpu(
         }
     }
     else{
-        
         // Compute H_tmp = Q*H (dense MMM) (m+1 x m) = (m+1 x m+1)(m+1 x m)(i.e. perform all rotations on H)
         // NOTE: Could cut the indices in half+1, since only an "upper" (lower here) hessenberg matrix mult
-        // for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
-        for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
-            for(int col_idx = 0; col_idx < restart_len; ++col_idx){
-                double tmp = 0.0;
-                strided_2_dot(&Q[(restart_len+1)*(row_idx)], &H[col_idx], &tmp, restart_len+1, restart_len);
-                // for (int i = 0; i < (restart_len+1); ++i){
-                //     tmp += Q[row_idx*(restart_len+1) + i] * H[col_idx + i*restart_len];
-                //     std::cout << Q[row_idx*(restart_len+1)+i] << " * " << H[col_idx + i*(restart_len)] << std::endl;
-                // }
-
-                H_tmp[(row_idx*restart_len) + col_idx] = tmp;
-            }
-        }
+        dense_MMM_t_t(Q, H, H_tmp, (restart_len+1), (restart_len+1), restart_len);
     }
     timers->gmres_compute_H_tmp_wtime->end_stopwatch();
 
@@ -422,24 +416,7 @@ void gm_iteration_ref_cpu(
     // Combine local Givens rotations with all previous, 
     // i.e. compute Q <- J*Q (dense MMM)
     timers->gmres_compute_Q_wtime->start_stopwatch();
-    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
-        for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
-            double tmp = 0.0;
-            // Recall, J is transposed so we can access rows here
-            // We need to read and write to different Q structs to avoid conflicts
-            // strided_1_dot(&Q_copy[(restart_len+1)*(row_idx + iter_count) + iter_count], &J[col_idx], &tmp, 2, restart_len);
-            // strided_2_dot(&J[2*row_idx], &Q_copy[col_idx + (restart_len+1)*iter_count + iter_count], &tmp, 2, restart_len+1);
-            // Q[(restart_len+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
-            // Q[(restart_len+1)*(row_idx + iter_count) + col_idx + iter_count] = tmp;
-            strided_2_dot(&J[row_idx*(restart_len+1)], &Q[col_idx], &tmp, restart_len+1, restart_len+1);
-            // for (int i = 0; i < (restart_len+1); ++i){
-            //     tmp += Q[row_idx*(restart_len+1) + i] * J[col_idx + i*(restart_len+1)];
-            //     std::cout << Q[row_idx*(restart_len+1)] << " * " << J[col_idx + i*(restart_len+1)] << std::endl;
-            // }
-            Q_copy[row_idx*(restart_len+1) + col_idx] = tmp;
-
-        }
-    }
+    dense_MMM_t_t(J, Q, Q_copy, (restart_len+1), (restart_len+1), (restart_len+1));
 
     // std::swap(Q_copy, Q);
     // Q = Q_copy;
@@ -465,19 +442,7 @@ void gm_iteration_ref_cpu(
 
     // R <- Q*H (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
     timers->gmres_compute_R_wtime->start_stopwatch();
-    for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
-        for(int col_idx = 0; col_idx < restart_len; ++col_idx){
-            double tmp = 0.0;
-            strided_2_dot(&Q[row_idx*(restart_len+1)], &H[col_idx], &tmp, restart_len+1, restart_len);
-
-            // for (int i = 0; i < (restart_len+1); ++i){
-            //     tmp += Q[row_idx*(restart_len+1) + i] * H[col_idx + i*restart_len];
-            //     std::cout << Q[row_idx*(restart_len+1)+i] << " * " << H[col_idx + i*(restart_len)] << std::endl;
-            // }
-
-            R[(row_idx*restart_len) + col_idx] = tmp;
-        }
-    }
+    dense_MMM_t_t(Q, H, R, (restart_len+1), (restart_len+1), restart_len);
     timers->gmres_compute_R_wtime->end_stopwatch();
 
 #ifdef DEBUG_MODE
@@ -559,14 +524,9 @@ void gm_iteration_ref_cpu(
     g_copy[0] = beta;
     init(g, 0.0, restart_len+1);
     g[0] = beta;
-    for(int row_idx = 0; row_idx < restart_len+1; ++row_idx){
-        double tmp = 0.0;
-        dot(&Q[row_idx*(restart_len+1)], g, &tmp, restart_len+1);
+    dense_MMM(Q, g, g_copy, (restart_len+1), (restart_len+1), 1);
 
-        g_copy[row_idx] = tmp;
-    }
-
-    // Very lazy !
+    // TODO: lazy copy
     for(int row_idx = 0; row_idx < restart_len+1; ++row_idx){
         g[row_idx] = g_copy[row_idx];
     }
@@ -607,6 +567,7 @@ void solve_cpu(
     double residual_norm;
 
     // Need deep copy TODO: rethink and do better
+    #pragma omp parallel for
     for(int i = 0; i < args->vec_size; ++i){
         x[i] = args->x_old[i];
         x_new[i] = args->x_new[i];
@@ -691,9 +652,11 @@ void solve_cpu(
 
         // Record residual every "residual_check_len" iterations
         if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0){
-            if(args->solver_type == "gmres"){
-                gmres_get_x(args->R, args->g, x, x_old, args->V, args->vec_size, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
-            }
+            // if(args->solver_type == "gmres"){
+            //     args->timers->gmres_get_x_wtime->start_stopwatch();
+            //     gmres_get_x(args->R, args->g, x, x_old, args->V, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+            //     args->timers->gmres_get_x_wtime->end_stopwatch();
+            // }
             record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, x, args->b, x_new, args->tmp);
         }
 
@@ -718,18 +681,20 @@ void solve_cpu(
 #ifdef DEBUG_MODE
                 std::cout << "RESTART GMRES" << std::endl;
 #endif
-                gmres_get_x(args->R, args->g, x, x_old, args->V, args->vec_size, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+                args->timers->gmres_get_x_wtime->start_stopwatch();
+                gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+                args->timers->gmres_get_x_wtime->end_stopwatch();
                 // Q: are you getting the right x here?
-                calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->vec_size);
+                calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->coo_mat->n_cols);
 #ifdef DEBUG_MODE
                 printf("restart residual = [");
-                for(int i = 0; i < args->vec_size; ++i){
+                for(int i = 0; i < args->coo_mat->n_cols; ++i){
                     std::cout << args->r[i] << ",";
                 }
                 printf("]\n");
 #endif
-                args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size); 
-                scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
+                args->beta = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols); 
+                scale(args->init_v, args->r, 1 / args->beta, args->coo_mat->n_cols);
     
 #ifdef DEBUG_MODE
                 std::cout << "Restarted Beta = " << args->beta << std::endl;          
@@ -745,8 +710,6 @@ void solve_cpu(
 #ifdef DEBUG_MODE
                 printf("restarted norm(initial residual) = %f\n", norm_r0);
 #endif
-
-                // scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
                 init_gmres_structs(args, args->vec_size);
                 ++args->restart_count;
 #ifdef DEBUG_MODE
@@ -758,6 +721,7 @@ void solve_cpu(
 #endif
 
                 // Need deep copy TODO: rethink and do better
+                #pragma omp parallel for
                 for(int i = 0; i < args->vec_size; ++i){
                     x_old[i] = x[i];
                 }
@@ -795,8 +759,12 @@ void solve_cpu(
     }    
     
     // Record final residual with approximated solution vector x_star
-    if(args->solver_type == "gmres")
-        gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, args->vec_size, args->restart_count, args->loop_params->iter_count - 1, args->loop_params->gmres_restart_len);
+    if(args->solver_type == "gmres"){
+        // Only needed if you actually want the x vector
+        // args->timers->gmres_get_x_wtime->start_stopwatch();
+        // gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count - 1, args->loop_params->gmres_restart_len);
+        // args->timers->gmres_get_x_wtime->end_stopwatch();
+    }
 
     record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, args->x_star, args->b, args->x_star, args->tmp);
 
@@ -806,8 +774,9 @@ void solve_cpu(
     apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
 
     // Deep copy, so you can free memory
-    // TODO: wrap in func
-    for(int i = 0; i < args->vec_size; ++i){
+    // NOTE: You do not take SCS padding with you! 
+    #pragma omp parallel for
+    for(int i = 0; i < args->coo_mat->n_cols; ++i){
         args->x_star[i] = x_star_perm[i];
     }
 

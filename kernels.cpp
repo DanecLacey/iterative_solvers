@@ -74,7 +74,7 @@ void subtract_vectors_cpu(
     double scale
 ){
     // Orphaned directive: Assumed already called within a parallel region
-    // #pragma omp for
+    #pragma omp for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec1[i] - scale*vec2[i];
         // std::cout << vec1[i] << " - " << scale << "*" << vec2[i] <<std::endl;
@@ -102,7 +102,8 @@ void scale(
     const double scalar,
     int N
 ){
-    // #pragma omp parallel for
+    // Orphaned directive
+    #pragma omp for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec[i] * scalar;
 #ifdef DEBUG_MODE_FINE
@@ -134,7 +135,7 @@ void strided_1_dot(
     int stride
 ){
     double sum = 0;
-    // #pragma omp parallel for reduction(+:sum)
+    #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i*stride] * vec2[i];
     }
@@ -152,6 +153,7 @@ void strided_2_dot(
     // #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i] * vec2[i*stride];
+        // N = restart_len+1, , stride = restart_len 
     }
     *result = sum;
 }
@@ -434,12 +436,77 @@ void spltsv_crs(
     }
 }
 
+// C = AB (n x m) = (n x q)(q x m)
+void dense_MMM(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+){
+    // #pragma omp parallel for collapse(2)
+    for (int i = 0; i < n_rows_A; ++i) {
+        for (int j = 0; j < n_cols_B; ++j) {
+            double tmp = 0.0;
+            for (int k = 0; k < n_cols_A; ++k) {
+                tmp += A[i * n_cols_A + k] * B[k * n_cols_B + j];
+            }
+            C[i * n_cols_B + j] = tmp;
+        }
+    }
+}
+
+// C = AB^t (n x q) = (n x m)(m x q)
+void dense_MMM_t(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+){
+    #pragma omp parallel for collapse(2)
+    for (int i = 0; i < n_rows_A; ++i) {
+        for (int j = 0; j < n_cols_B; ++j) {
+            double tmp = 0.0;
+            for (int k = 0; k < n_cols_A; ++k) {
+                tmp += A[k * n_rows_A + i] * B[k * n_cols_B + j];
+            }
+            C[i * n_cols_B + j] = tmp;
+        }
+    }
+}
+
+// C = AB??? (n x q) = (n x m)(m x q)
+void dense_MMM_t_t(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+){
+    // restart-local matrices typically not large enough for parallel for
+    // #pragma omp parallel for collapse(2)
+    for (int i = 0; i < n_rows_A; ++i) {
+        for (int j = 0; j < n_cols_B; ++j) {
+            double tmp = 0.0;
+            for (int k = 0; k < n_cols_A; ++k) {
+                tmp += A[i * n_cols_A + k] * B[k * n_cols_B + j];
+            }
+            C[i * n_cols_B + j] = tmp;
+        }
+    }
+}
+
 double euclidean_vec_norm_cpu(
     const double *vec,
     int N
 ){
     double tmp = 0.0;
 
+    // Orphaned Directive
     #pragma omp parallel for reduction(+:tmp)
     for(int i = 0; i < N; ++i){
         tmp += vec[i] * vec[i];
@@ -569,19 +636,20 @@ void calc_residual_cpu(
     //Unpack args 
     #pragma omp parallel
     {
-#ifdef USE_USPMV
-        uspmv_omp_scs_cpu<double, int>(
-            sparse_mat->scs_mat->C,
-            sparse_mat->scs_mat->n_chunks,
-            &(sparse_mat->scs_mat->chunk_ptrs)[0],
-            &(sparse_mat->scs_mat->chunk_lengths)[0],
-            &(sparse_mat->scs_mat->col_idxs)[0],
-            &(sparse_mat->scs_mat->values)[0],
-            x,
-            tmp);
-#else
+// Theres no reason we need to use SCS for this, right?
+// #ifdef USE_USPMV
+//         uspmv_omp_scs_cpu<double, int>(
+//             sparse_mat->scs_mat->C,
+//             sparse_mat->scs_mat->n_chunks,
+//             &(sparse_mat->scs_mat->chunk_ptrs)[0],
+//             &(sparse_mat->scs_mat->chunk_lengths)[0],
+//             &(sparse_mat->scs_mat->col_idxs)[0],
+//             &(sparse_mat->scs_mat->values)[0],
+//             x,
+//             tmp);
+// #else
         spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
-#endif
+// #endif
         subtract_vectors_cpu(r, b, tmp, N);
     }
 }

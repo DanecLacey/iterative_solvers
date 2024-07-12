@@ -292,19 +292,25 @@ void print_timers(argType *args){
     long double spmv_wtime;
     long double orthog_wtime; 
     long double mgs_wtime;
+    long double mgs_dot_wtime;
+    long double mgs_sub_wtime;
     long double leastsq_wtime;
     long double compute_H_tmp_wtime;
     long double compute_Q_wtime;
     long double compute_R_wtime;
+    long double get_x_wtime;
 
     if(args->solver_type == "gmres"){
         spmv_wtime = args->timers->gmres_spmv_wtime->get_wtime();
         orthog_wtime = args->timers->gmres_orthog_wtime->get_wtime();
         mgs_wtime = args->timers->gmres_mgs_wtime->get_wtime();
+        mgs_dot_wtime = args->timers->gmres_mgs_dot_wtime->get_wtime();
+        mgs_sub_wtime = args->timers->gmres_mgs_sub_wtime->get_wtime();
         leastsq_wtime = args->timers->gmres_leastsq_wtime->get_wtime();
         compute_H_tmp_wtime = args->timers->gmres_compute_H_tmp_wtime->get_wtime();
         compute_Q_wtime = args->timers->gmres_compute_Q_wtime->get_wtime();
         compute_R_wtime = args->timers->gmres_compute_R_wtime->get_wtime();
+        get_x_wtime = args->timers->gmres_get_x_wtime->get_wtime();
     }
 
     int right_flush_width = 30;
@@ -312,32 +318,38 @@ void print_timers(argType *args){
 
     std::cout << "+---------------------------------------------------------+" << std::endl;
 
-    std::cout << std::left << std::setw(left_flush_width) << "Total elapsed time: " << std::right << std::setw(right_flush_width) << total_wtime  << std::endl;
-    std::cout << std::left << std::setw(left_flush_width) << "| Preprocessing time: " << std::right << std::setw(right_flush_width) << preprocessing_wtime  << std::endl;
-    std::cout << std::left << std::setw(left_flush_width) << "| Solver Harness time: " << std::right << std::setw(right_flush_width) << solver_harness_wtime  <<std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "Total elapsed time: " << std::right << std::setw(right_flush_width) << total_wtime  << "[s]" << std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "| Preprocessing time: " << std::right << std::setw(right_flush_width) << preprocessing_wtime  << "[s]" << std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "| Solver Harness time: " << std::right << std::setw(right_flush_width) << solver_harness_wtime  << "[s]" << std::endl;
 
     if(args->solver_type == "jacobi"){
-        std::cout << std::left << std::setw(left_flush_width) << "| | Jacobi Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | Jacobi Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
     }
     else if(args->solver_type == "gauss-seidel"){
-        std::cout << std::left << std::setw(left_flush_width) << "| | GS Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | GS Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
     }
 
     if(args->solver_type == "gmres"){
-        std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "               << std::right << std::setw(right_flush_width) << spmv_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "  << std::right << std::setw(right_flush_width) << orthog_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "               << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "  << std::right << std::setw(right_flush_width) << orthog_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | | Dot: "              << std::right << std::setw(right_flush_width) << mgs_dot_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | | Sub: "              << std::right << std::setw(right_flush_width) << mgs_sub_wtime  << "[s]" <<std::endl;
         long double orthog_tmp = mgs_wtime;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "   << std::right << std::setw(right_flush_width) << leastsq_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "    << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "        << std::right << std::setw(right_flush_width) << compute_Q_wtime  <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "        << std::right << std::setw(right_flush_width) << compute_R_wtime  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "   << std::right << std::setw(right_flush_width) << leastsq_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "    << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "        << std::right << std::setw(right_flush_width) << compute_Q_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "        << std::right << std::setw(right_flush_width) << compute_R_wtime  << "[s]" <<std::endl;
         long double leastsq_tmp = compute_H_tmp_wtime + compute_Q_wtime + compute_R_wtime; 
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp  <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp << "[s]" << std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Get x: "               << std::right << std::setw(right_flush_width) << get_x_wtime  << "[s]" <<std::endl;
+
+        solver_wtime += get_x_wtime;
+
     }
-    std::cout << std::left << std::setw(left_flush_width) << "| | Other: " << std::right << std::setw(right_flush_width) << solver_harness_wtime - solver_wtime  <<std::endl;
+    std::cout << std::left << std::setw(left_flush_width) << "| | Other: " << std::right << std::setw(right_flush_width) << solver_harness_wtime - solver_wtime << "[s]" << std::endl;
 
     std::cout << "+---------------------------------------------------------+" << std::endl;
 

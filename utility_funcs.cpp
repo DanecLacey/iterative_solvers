@@ -30,7 +30,8 @@ void init(
     int size
 ){
     // TODO: validate first touch policy?
-    #pragma omp parallel for
+    // Orphaned Directive
+    #pragma omp for
     for(int i = 0; i < size; ++i){
         vec[i] = val;
     }
@@ -43,7 +44,8 @@ void init_identity(
     int n_cols
 ){
     // TODO: validate first touch policy?
-    #pragma omp parallel for
+    // Orphaned Directive
+    #pragma omp for
     for(int i = 0; i < n_rows; ++i){
         for(int j = 0; j < n_cols; ++j){
             if(i == j){
@@ -338,62 +340,34 @@ void gmres_get_x(
     double *x,
     double *x_0,
     double *V,
+    double *Vy,
     int n_rows,
     int restart_count,
     int iter_count,
-    int max_gmres_iters
+    int restart_len
 ){
-    // double *y = new double[max_gmres_iters];
-    // init(y, 0.0, max_gmres_iters);
-    // double *Vy = new double[n_rows];
-    // init(Vy, 0.0, n_rows);
-    std::vector<double> y(max_gmres_iters, 0.0);
-    std::vector<double> Vy(n_rows, 0.0);
+    std::vector<double> y(restart_len, 0.0);
 
     double diag_elem = 0.0;
     double sum;
 
     // Adjust for restarting
-    iter_count -= restart_count*max_gmres_iters;
+    iter_count -= restart_count* restart_len;
 
 #ifdef DEBUG_MODE
-    // Lazy way to account for restarts
-    std::cout << "gmres_get_x iter_count = " << iter_count << " -> ";
-    // ^ To get around weird "iter-1" problem for now
     std::cout << "gmres_get_x iter_count = " << iter_count << std::endl;
     std::cout << "gmres_get_x restart_count = " << restart_count << std::endl;
 #endif
-
-    // Could probably optimize col_idxs/2
-    // Can only solve first "iter_count+1 rows"
-    // for(int row_idx = 0; row_idx <= iter_count; ++row_idx){
-    //     sum = 0.0;
-    //     for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-    //         if(row_idx == col_idx){
-    //             diag_elem = R[(row_idx*max_gmres_iters) + col_idx];
-    //         }
-    //         sum += R[(row_idx*max_gmres_iters) + col_idx] * y[row_idx];
-    //     }
-    //     y[row_idx] = (g[row_idx] - sum) / diag_elem;
-    // }
 
 #ifdef DEBUG_MODE
     std::cout << "when solving for x, R" << " = [\n";
     for(int row_idx = iter_count; row_idx >= 0; --row_idx){
         for(int col_idx = iter_count; col_idx >= 0; --col_idx){
                 std::cout << std::setw(11);
-                std::cout << R[(row_idx*max_gmres_iters) + col_idx]  << ", ";
+                std::cout << R[(row_idx*restart_length) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
-    // for(int row_idx = 0; row_idx <= max_gmres_iters; ++row_idx){
-    //     for(int col_idx = 0; col_idx < max_gmres_iters; ++col_idx){
-    //         std::cout << std::setw(11);
-    //         std::cout << R[(row_idx*max_gmres_iters) + col_idx]  << ", ";
-    //     }
-    //     std::cout << "\n";
-    // }
-
     std::cout << "]" << std::endl;
 #endif
 
@@ -401,12 +375,12 @@ void gmres_get_x(
     // Traverse R \in \mathbb{R}^(m+1 x m) from last to first row
     for(int row_idx = iter_count; row_idx >= 0; --row_idx){
         sum = 0.0;
-        for(int col_idx = row_idx; col_idx < max_gmres_iters; ++col_idx){
+        for(int col_idx = row_idx; col_idx < restart_len; ++col_idx){
             if(row_idx == col_idx){
-                diag_elem = R[(row_idx*max_gmres_iters) + col_idx];
+                diag_elem = R[(row_idx*restart_len) + col_idx];
             }
             else{
-                sum += R[(row_idx*max_gmres_iters) + col_idx] * y[col_idx];
+                sum += R[(row_idx*restart_len) + col_idx] * y[col_idx];
             }
             
         }
@@ -418,22 +392,14 @@ void gmres_get_x(
 
 #ifdef DEBUG_MODE
     std::cout << "y_" << iter_count << " = [\n";
-    for(int i = 0; i < max_gmres_iters; ++i){
+    for(int i = 0; i < restart_len; ++i){
         std::cout << y[i]  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif
 
     // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
-    for(int col_idx = 0; col_idx < n_rows; ++col_idx){
-        double tmp = 0.0;
-        strided_1_dot(&V[col_idx], &y[0], &tmp, max_gmres_iters, n_rows);
-        // for (int i = 0; i < max_gmres_iters; ++i){
-        //     tmp += V[i*n_rows + col_idx] * y[i];
-        //     // std::cout << V[i*n_rows + col_idx] << " * " << y[i] << std::endl; 
-        // }
-    Vy[col_idx] = tmp;
-    }
+    dense_MMM_t(V, &y[0], Vy, n_rows, restart_len, 1);
 
 #ifdef DEBUG_MODE
     std::cout << "Vy_" << iter_count << " = [\n";
@@ -448,9 +414,6 @@ void gmres_get_x(
         x[i] = x_0[i] + Vy[i];
         // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
     }
-
-    // delete y;
-    // delete Vy;
 }
 
 void init_gmres_structs(
@@ -458,15 +421,24 @@ void init_gmres_structs(
     int n_rows
 ){
     int restart_len = args->gmres_restart_len;
-        
-    init(args->V, 0.0, n_rows * (restart_len+1));
+    
+    #pragma omp parallel
+    {
+        init(args->V, 0.0, n_rows * (restart_len+1));
 
-    // Give v0 to first row of V
-    for(int i = 0; i < n_rows; ++i){
-        args->V[i] = args->init_v[i];
+        // Give v0 to first row of V
+        #pragma omp for
+        for(int i = 0; i < n_rows; ++i){
+            args->V[i] = args->init_v[i];
+        }
     }
     
     init(args->H, 0.0, restart_len * (restart_len+1));
+
+    #pragma omp parallel
+    {
+        init(args->Vy, 0.0, n_rows);
+    }
     
     init_identity(args->R, 0.0, restart_len, (restart_len+1));
     
@@ -496,24 +468,20 @@ void record_residual_norm(
         calc_residual_cpu(sparse_mat, x_new, b, r, tmp, args->vec_size);
         *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
     }
-
-    if(args->solver_type == "gauss-seidel"){
+    else if(args->solver_type == "gauss-seidel"){
         calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
         *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
     }
-    
-    if(args->solver_type == "gmres"){
+    else if(args->solver_type == "gmres"){
         // NOTE: While not needed for GMRES in theory, it is helpful to compare
         // a computed residual with g[-1] when debugging 
-        calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
-        for(int i = 0; i < args->vec_size; ++i){
-            // std::cout << "outer_r[" << i << "] = "<< r[i] << std::endl;
-        }
-        *residual_norm = euclidean_vec_norm_cpu(r, args->vec_size);
-#ifdef DEBUG_MODE
-        std::cout << "computed residual_norm = " << *residual_norm << std::endl;
-#endif
-        // exit(0);
+//         calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
+//         *residual_norm = euclidean_vec_norm_cpu(r, args->vec_size);
+// #ifdef DEBUG_MODE
+//         std::cout << "computed residual_norm = " << *residual_norm << std::endl;
+// #endif
+
+        // The residual norm is already implicitly computed, and is output from the GMRES iteration
     }
     
     args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
@@ -559,7 +527,7 @@ void print_x(
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
     if(args->solver_type == "gmres"){
-        gmres_get_x(args->R, args->g, x, x_old, args->V, n_rows, args->restart_count, args->loop_params->iter_count, args->gmres_restart_len);
+        gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, n_rows, args->restart_count, args->loop_params->iter_count, args->gmres_restart_len);
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
 }
@@ -627,6 +595,16 @@ void init_gmres_timers(argType *args){
     Stopwatch *gmres_mgs_wtime = new Stopwatch(gmres_mgs_start, gmres_mgs_end);
     args->timers->gmres_mgs_wtime = gmres_mgs_wtime;
 
+    timeval *gmres_mgs_dot_start = new timeval;
+    timeval *gmres_mgs_dot_end = new timeval;
+    Stopwatch *gmres_mgs_dot_wtime = new Stopwatch(gmres_mgs_dot_start, gmres_mgs_dot_end);
+    args->timers->gmres_mgs_dot_wtime = gmres_mgs_dot_wtime;
+
+    timeval *gmres_mgs_sub_start = new timeval;
+    timeval *gmres_mgs_sub_end = new timeval;
+    Stopwatch *gmres_mgs_sub_wtime = new Stopwatch(gmres_mgs_sub_start, gmres_mgs_sub_end);
+    args->timers->gmres_mgs_sub_wtime = gmres_mgs_sub_wtime;
+
     timeval *gmres_leastsq_start = new timeval;
     timeval *gmres_leastsq_end = new timeval;
     Stopwatch *gmres_leastsq_wtime = new Stopwatch(gmres_leastsq_start, gmres_leastsq_end);
@@ -646,245 +624,90 @@ void init_gmres_timers(argType *args){
     timeval *gmres_compute_R_end = new timeval;
     Stopwatch *gmres_compute_R_wtime = new Stopwatch(gmres_compute_R_start, gmres_compute_R_end);
     args->timers->gmres_compute_R_wtime = gmres_compute_R_wtime;
+
+    timeval *gmres_get_x_start = new timeval;
+    timeval *gmres_get_x_end = new timeval;
+    Stopwatch *gmres_get_x_wtime = new Stopwatch(gmres_get_x_start, gmres_get_x_end);
+    args->timers->gmres_get_x_wtime = gmres_get_x_wtime;
 }
 
-// TODO: MPI preprocessing will go here
-void preprocessing(
-    argType *args
-){
-    std::cout << "Preprocessing Matrix Data" << std::endl;
-    timeval preprocessing_start, preprocessing_end;
-    Stopwatch *preprocessing_wtime = new Stopwatch(&preprocessing_start, &preprocessing_end);
-    args->timers->preprocessing_wtime = preprocessing_wtime;
-    args->timers->preprocessing_wtime->start_stopwatch();
+void init_gs_structs(argType *args){
+    COOMtxData *coo_L = new COOMtxData;
+    COOMtxData *coo_U = new COOMtxData;
 
-    if(args->solver_type == "gmres"){
-        init_gmres_timers(args);
-    }
-    if(args->solver_type == "gauss-seidel"){
-        COOMtxData *coo_L = new COOMtxData;
-        COOMtxData *coo_U = new COOMtxData;
-
-        split_L_U(args->coo_mat, coo_L, coo_U);
+    split_L_U(args->coo_mat, coo_L, coo_U);
 
 #ifdef USE_USPMV
-        // Only used for GS kernel
-        // TODO: Find a better solution than this crap
-        MtxData<double, int> *mtx_L = new MtxData<double, int>;
-        mtx_L->n_rows = coo_L->n_rows;
-        mtx_L->n_cols = coo_L->n_cols;
-        mtx_L->nnz = coo_L->nnz;
-        mtx_L->is_sorted = true; //TODO
-        mtx_L->is_symmetric = false; //TODO
-        mtx_L->I = coo_L->I;
-        mtx_L->J = coo_L->J;
-        mtx_L->values = coo_L->values;
-        convert_to_scs<double, int>(mtx_L, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_L);
+    // Only used for GS kernel
+    // TODO: Find a better solution than this crap
+    MtxData<double, int> *mtx_L = new MtxData<double, int>;
+    mtx_L->n_rows = coo_L->n_rows;
+    mtx_L->n_cols = coo_L->n_cols;
+    mtx_L->nnz = coo_L->nnz;
+    mtx_L->is_sorted = true; //TODO
+    mtx_L->is_symmetric = false; //TODO
+    mtx_L->I = coo_L->I;
+    mtx_L->J = coo_L->J;
+    mtx_L->values = coo_L->values;
+    convert_to_scs<double, int>(mtx_L, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_L);
 
-        MtxData<double, int> *mtx_U = new MtxData<double, int>;
-        mtx_U->n_rows = coo_U->n_rows;
-        mtx_U->n_cols = coo_U->n_cols;
-        mtx_U->nnz = coo_U->nnz;
-        mtx_U->is_sorted = true; //TODO
-        mtx_U->is_symmetric = false; //TODO
-        mtx_U->I = coo_U->I;
-        mtx_U->J = coo_U->J;
-        mtx_U->values = coo_U->values;
-        convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_U);
+    MtxData<double, int> *mtx_U = new MtxData<double, int>;
+    mtx_U->n_rows = coo_U->n_rows;
+    mtx_U->n_cols = coo_U->n_cols;
+    mtx_U->nnz = coo_U->nnz;
+    mtx_U->is_sorted = true; //TODO
+    mtx_U->is_symmetric = false; //TODO
+    mtx_U->I = coo_U->I;
+    mtx_U->J = coo_U->J;
+    mtx_U->values = coo_U->values;
+    convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_U);
 #endif
-        convert_to_crs(coo_L, args->sparse_mat->crs_L);
-        convert_to_crs(coo_U, args->sparse_mat->crs_U);
+    convert_to_crs(coo_L, args->sparse_mat->crs_L);
+    convert_to_crs(coo_U, args->sparse_mat->crs_U);
 
-        delete coo_L;
-        delete coo_U;
-    }
-
-#ifdef USE_USPMV
-    MtxData<double, int> *mtx_mat = new MtxData<double, int>;
-    mtx_mat->n_rows = args->coo_mat->n_rows;
-    mtx_mat->n_cols = args->coo_mat->n_cols;
-    mtx_mat->nnz = args->coo_mat->nnz;
-    mtx_mat->is_sorted = true; //TODO
-    mtx_mat->is_symmetric = false; //TODO
-    mtx_mat->I = args->coo_mat->I;
-    mtx_mat->J = args->coo_mat->J;
-    mtx_mat->values = args->coo_mat->values;
-
-    // NOTE: Symmetric permutation, i.e. rows and columns
-    convert_to_scs(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
-    permute_scs_cols(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
-    args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
-#else
-    args->vec_size = args->coo_mat->n_cols;
-#endif
-
-#ifdef OUTPUT_SPARSITY
-    std::string file_out_name = "output_matrix";
-    std::cout << "Writing sparsity to mtx file..." << std::endl;
-    args->coo_mat->write_to_mtx_file(0, file_out_name);
-    exit(0);
-    std::cout << "Finished" << std::endl;
-#endif
-
-    std::vector<double> largest_elems(args->vec_size, 0.0);
-    extract_largest_elems(args->coo_mat, &largest_elems);
-
-    // An optional, but usually necessary preprocessing step
-    scale_matrix(args->coo_mat, &largest_elems);
-
-    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
-    
-#ifdef __CUDACC__
-    gpu_allocate_copy_sparse_mat(args);
-#endif
-
-    extract_diag(args->coo_mat, args->D);
-
-    // Make b vector
-    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
-    // ^ b should likely draw from A(min) to A(max) range of values
-    scale_vector(args->b, &largest_elems, args->vec_size);
-
-    // Make initial x vector
-    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
-    scale_vector(args->x_old, &largest_elems, args->vec_size);
-
-#ifdef USE_USPMV
-    // Need to permute these vectors in accordance with SIGMA if using USpMV library
-    double *D_perm = new double [args->vec_size];
-    apply_permutation(D_perm, args->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    // std::swap(D_perm, args->D);
-
-    double *b_perm = new double [args->vec_size];
-    apply_permutation(b_perm, args->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    // std::swap(b_perm, args->b);
-
-    // NOTE: Permuted w.r.t. columns due to symmetric permutation
-    double *x_old_perm = new double[args->vec_size];
-    apply_permutation(x_old_perm, args->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
-    // std::swap(x_old_perm, args->x_old);
-
-    // Deep copy, so you can free memory
-    // TODO: wrap in func
-    for(int i = 0; i < args->vec_size; ++i){
-        args->D[i] = D_perm[i];
-        args->b[i] = b_perm[i];
-        args->x_old[i] = x_old_perm[i];
-    }
-
-    delete D_perm;
-    delete b_perm;
-    delete x_old_perm;
-#endif
+    delete coo_L;
+    delete coo_U;
+}
 
 #ifdef __CUDACC__
-    gpu_copy_structs(args);
-#endif
 
-    // Precalculate stopping criteria
-    // Easier to just do on the host for now
-    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->vec_size);
-
-    if(args->solver_type == "gmres"){
-        args->beta = euclidean_vec_norm_cpu(args->r, args->vec_size);
-        scale(args->init_v, args->r, 1 / args->beta, args->vec_size);
-
-#ifdef DEBUG_MODE
-        std::cout << "Beta = " << args->beta << std::endl;
-        std::cout << "init_v = [";
-            for(int i = 0; i < args->sparse_mat->crs_mat->n_rows; ++i){
-                std::cout << args->init_v[i] << ", ";
-            }
-        std::cout << "]" << std::endl;
-#endif
-
-    }
-
-#ifdef DEBUG_MODE
-    printf("initial residual = [");
-    for(int i = 0; i < args->vec_size; ++i){
-        std::cout << args->r[i] << ",";
-    }
-    printf("]\n");
-#endif
-
-    double norm_r0;
-
-    if(args->solver_type == "gmres"){
-        norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
-    }
-    else{
-        norm_r0 = infty_vec_norm_cpu(args->r, args->vec_size);
-    }
-    args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
-
-
-#ifdef DEBUG_MODE
-    printf("norm(initial residual) = %f\n", norm_r0);
-    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
-    std::cout << "stopping criteria = " << args->loop_params->tol <<  " * " <<  norm_r0 << " = " << args->loop_params->stopping_criteria << std::endl;
-#endif
-
-// #ifdef __CUDACC__
-//     // The first residual is computed on the host, and given to the device
-//     // Easier to just do on the host for now, and give stopping criteria to device
-//     cudaMalloc(&(args->loop_params->d_stopping_criteria), sizeof(double));
-//     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
-// #endif
-
-    args->timers->preprocessing_wtime->end_stopwatch();
-}
-
-void allocate_structs(
+void gpu_allocate_structs(
     argType *args
 ){
-    std::cout << "Allocating space for general structs" << std::endl;
-    double *x_star = new double[args->vec_size];
-    double *x_old = new double[args->vec_size];
-    double *x_new = new double[args->vec_size];
-    double *tmp = new double[args->vec_size];
-    double *D = new double[args->vec_size];
-    double *r = new double[args->vec_size];
-    double *b = new double[args->vec_size];
-    double *normed_residuals = new double[args->loop_params->max_iters / args->loop_params->residual_check_len + 1];
-
-    args->x_star = x_star;
-    args->x_old = x_old;
-    args->x_new = x_new;
-    args->tmp = tmp;
-    args->D = D;
-    args->r = r;
-    args->b = b;
-    args->normed_residuals = normed_residuals;
+    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
 }
 
-void gmres_allocate_structs(
+void gpu_allocate_copy_sparse_mat(
     argType *args
 ){
-    std::cout << "Allocating space for GMRES structs" << std::endl;
-    double *init_v = new double[args->vec_size];
-    double *V = new double[args->vec_size * (args->loop_params->gmres_restart_len+1)]; // (m x n)
-    double *H = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m) 
-    double *H_tmp = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m)
-    double *J = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)];
-    double *R = new double[args->loop_params->gmres_restart_len * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m)
-    double *Q = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
-    double *Q_copy = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
-    double *g = new double[args->loop_params->gmres_restart_len+1];
-    double *g_copy = new double[args->loop_params->gmres_restart_len+1];
-
-    args->init_v = init_v;
-    args->V = V;
-    args->H = H;
-    args->H_tmp = H_tmp;
-    args->J = J;
-    args->R = R;
-    args->Q = Q;
-    args->Q_copy = Q_copy;
-    args->g = g;
-    args->g_copy = g_copy;
-    args->restart_count = 0;
+    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
+    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
+    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
+    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
 }
+
+void gpu_copy_structs(
+    argType *args
+){
+    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+}
+
+#endif
 
 #ifdef USE_SCAMAC
 /* helper function:
@@ -1091,42 +914,234 @@ void scamac_make_mtx(
 }
 #endif
 
+void allocate_structs(
+    argType *args
+){
+    std::cout << "Allocating space for general structs" << std::endl;
+    double *x_star = new double[args->vec_size];
+    double *x_old = new double[args->vec_size];
+    double *x_new = new double[args->vec_size];
+    double *tmp = new double[args->vec_size];
+    double *D = new double[args->vec_size];
+    double *r = new double[args->vec_size];
+    double *b = new double[args->vec_size];
+    double *normed_residuals = new double[args->loop_params->max_iters / args->loop_params->residual_check_len + 1];
+
+    args->x_star = x_star;
+    args->x_old = x_old;
+    args->x_new = x_new;
+    args->tmp = tmp;
+    args->D = D;
+    args->r = r;
+    args->b = b;
+    args->normed_residuals = normed_residuals;
+}
+
+void gmres_allocate_structs(
+    argType *args
+){
+    std::cout << "Allocating space for GMRES structs" << std::endl;
+    double *init_v = new double[args->vec_size];
+    double *V = new double[args->vec_size * (args->loop_params->gmres_restart_len+1)]; // (m x n)
+    double *Vy = new double[args->vec_size]; // (m x 1)
+    double *H = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m) 
+    double *H_tmp = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m)
+    double *J = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)];
+    double *R = new double[args->loop_params->gmres_restart_len * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m)
+    double *Q = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
+    double *Q_copy = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
+    double *g = new double[args->loop_params->gmres_restart_len+1];
+    double *g_copy = new double[args->loop_params->gmres_restart_len+1];
+
+    args->init_v = init_v;
+    args->V = V;
+    args->Vy = Vy;
+    args->H = H;
+    args->H_tmp = H_tmp;
+    args->J = J;
+    args->R = R;
+    args->Q = Q;
+    args->Q_copy = Q_copy;
+    args->g = g;
+    args->g_copy = g_copy;
+    args->restart_count = 0;
+}
+
+// TODO: MPI preprocessing will go here
+void preprocessing(
+    argType *args
+){
+#ifdef OUTPUT_SPARSITY
+    // Just to visualize sparsity
+    std::string file_out_name = "output_matrix";
+    std::cout << "Writing sparsity to mtx file..." << std::endl;
+    args->coo_mat->write_to_mtx_file(0, file_out_name);
+    std::cout << "Finished" << std::endl;
+    exit(0);
+#endif
+
+    std::cout << "Preprocessing Matrix Data" << std::endl;
+    timeval *preprocessing_start = new timeval;
+    timeval *preprocessing_end = new timeval;
+    Stopwatch *preprocessing_wtime = new Stopwatch(preprocessing_start, preprocessing_end);
+    args->timers->preprocessing_wtime = preprocessing_wtime;
+    args->timers->preprocessing_wtime->start_stopwatch();
+
+#ifdef USE_USPMV
+    MtxData<double, int> *mtx_mat = new MtxData<double, int>;
+    mtx_mat->n_rows = args->coo_mat->n_rows;
+    mtx_mat->n_cols = args->coo_mat->n_cols;
+    mtx_mat->nnz = args->coo_mat->nnz;
+    mtx_mat->is_sorted = true; //TODO
+    mtx_mat->is_symmetric = false; //TODO
+    mtx_mat->I = args->coo_mat->I;
+    mtx_mat->J = args->coo_mat->J;
+    mtx_mat->values = args->coo_mat->values;
+
+    // NOTE: Symmetric permutation, i.e. rows and columns
+    convert_to_scs<double, int>(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
+    permute_scs_cols<double, int>(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
+
+    // NOTE: We change vec_size here, so all structs from here on will be different size!
+    args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
+#else
+    args->vec_size = args->coo_mat->n_cols;
+#endif
+
+    // Only now that we know args->vec_size, we can allocate structs 
+    allocate_structs(args);
+
 #ifdef __CUDACC__
+    gpu_allocate_structs(args);
+#endif
 
-void gpu_allocate_structs(
-    argType *args
-){
-    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
-}
+    if(args->solver_type == "gmres"){
+        gmres_allocate_structs(args);
+        init_gmres_timers(args);
+    }
+    if(args->solver_type == "gauss-seidel"){
+        init_gs_structs(args);
+    }
 
-void gpu_allocate_copy_sparse_mat(
-    argType *args
-){
-    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
-    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
-    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
-    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
-}
+    std::vector<double> largest_elems(args->vec_size, 0.0);
+    extract_largest_elems(args->coo_mat, &largest_elems);
 
-void gpu_copy_structs(
-    argType *args
-){
-    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-}
+    // An optional, but usually necessary preprocessing step
+    scale_matrix(args->coo_mat, &largest_elems);
+
+#ifdef USE_USPMV
+
+#ifdef USE_AP
+    MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
+    MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
+    seperate_lp_from_hp(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_elems, AP_THRESHOLD, true);
+
+    convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
+    convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
 
 #endif
+
+#else
+    // Only need to convert to CRS if SCS struct doesn't already exist
+    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
+#endif
+    
+#ifdef __CUDACC__
+    gpu_allocate_copy_sparse_mat(args);
+#endif
+
+    extract_diag(args->coo_mat, args->D);
+
+    // Make b vector
+    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
+    // ^ b should likely draw from A(min) to A(max) range of values
+    scale_vector(args->b, &largest_elems, args->vec_size);
+
+    // Make initial x vector
+    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
+    scale_vector(args->x_old, &largest_elems, args->vec_size);
+
+#ifdef USE_USPMV
+    // Need to permute these vectors in accordance with SIGMA if using USpMV library
+    double *D_perm = new double [args->vec_size];
+    apply_permutation(D_perm, args->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(D_perm, args->D);
+
+    double *b_perm = new double [args->vec_size];
+    apply_permutation(b_perm, args->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    // std::swap(b_perm, args->b);
+
+    // NOTE: Permuted w.r.t. columns due to symmetric permutation
+    double *x_old_perm = new double[args->vec_size];
+    apply_permutation(x_old_perm, args->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
+    // std::swap(x_old_perm, args->x_old);
+
+    // Deep copy, so you can free memory
+    // TODO: wrap in func
+    for(int i = 0; i < args->vec_size; ++i){
+        args->D[i] = D_perm[i]; // ?? Double Check!
+        args->b[i] = b_perm[i]; // ?? Double Check!
+        args->x_old[i] = x_old_perm[i];
+    }
+
+    delete D_perm;
+    delete b_perm;
+    delete x_old_perm;
+#endif
+
+#ifdef __CUDACC__
+    gpu_copy_structs(args);
+#endif
+
+    // Precalculate stopping criteria
+    // Easier to just do on the host for now
+    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->coo_mat->n_cols);
+
+    if(args->solver_type == "gmres"){
+        args->beta = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols);
+        scale(args->init_v, args->r, 1 / args->beta, args->coo_mat->n_cols);
+
+#ifdef DEBUG_MODE
+        std::cout << "Beta = " << args->beta << std::endl;
+        std::cout << "init_v = [";
+            for(int i = 0; i < args->coo_mat->n_cols; ++i){
+                std::cout << args->init_v[i] << ", ";
+            }
+        std::cout << "]" << std::endl;
+#endif
+    }
+
+#ifdef DEBUG_MODE
+    printf("initial residual = [");
+    for(int i = 0; i < args->coo_mat->n_cols; ++i){
+        std::cout << args->r[i] << ",";
+    }
+    printf("]\n");
+#endif
+
+    double norm_r0;
+
+    if(args->solver_type == "gmres"){
+        norm_r0 = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols);
+    }
+    else{
+        norm_r0 = infty_vec_norm_cpu(args->r, args->coo_mat->n_cols);
+    }
+    args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
+
+
+#ifdef DEBUG_MODE
+    printf("norm(initial residual) = %f\n", norm_r0);
+    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
+    std::cout << "stopping criteria = " << args->loop_params->tol <<  " * " <<  norm_r0 << " = " << args->loop_params->stopping_criteria << std::endl;
+#endif
+
+// #ifdef __CUDACC__
+//     // The first residual is computed on the host, and given to the device
+//     // Easier to just do on the host for now, and give stopping criteria to device
+//     cudaMalloc(&(args->loop_params->d_stopping_criteria), sizeof(double));
+//     cudaMemcpy(args->loop_params->d_stopping_criteria, &(args->loop_params->stopping_criteria), sizeof(double), cudaMemcpyHostToDevice);
+// #endif
+
+    args->timers->preprocessing_wtime->end_stopwatch();
+}

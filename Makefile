@@ -16,6 +16,8 @@ USE_GPROF = 0
 USE_SCAMAC = 0
 
 USE_USPMV = 0
+USE_AP = 0
+AP_THRESHOLD = 0.5
 CHUNK_SIZE = 1
 SIGMA = 1
 VECTOR_LENGTH = 4 # Assuming AVX instructions
@@ -30,7 +32,7 @@ ifeq ($(COMPILER),gcc)
   CXX       = g++
   OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
-  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH) -g
 endif
 
 ifeq ($(COMPILER),icc)
@@ -86,6 +88,9 @@ endif
 
 
 ifeq ($(USE_USPMV),1)
+  ifeq ($(USE_AP),1)
+    CXXFLAGS += -DUSE_AP -DAP_THRESHOLD
+  endif
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
   ifeq ($(COMPILER),nvcc)
     $(warning CUDA with USpMV and C or SIGMA > 1 not yet supported)
@@ -107,8 +112,8 @@ endif
 
 ifeq ($(USE_SCAMAC),1)
   # !!! include your own file paths !!!
-  # SCAMAC_INC =
-  # SCAMAC_LIB = 
+  SCAMAC_INC = -I/home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/scamac/include/
+  SCAMAC_LIB = /home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/library/libscamac.a
   ifeq ($(SCAMAC_INC),)
     $(error SCAMAC_INC selected, but no include path given in SCAMAC_INC)
   endif

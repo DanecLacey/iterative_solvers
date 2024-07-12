@@ -27,6 +27,33 @@ double infty_vec_norm_cpu(
     int N
 );
 
+void dense_MMM(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+);
+
+void dense_MMM_t(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+);
+
+void dense_MMM_t_t(
+    double *A,
+    double *B,
+    double *C,
+    int n_rows_A,
+    int n_cols_A,
+    int n_cols_B
+);
+
 void scale(
     double *result_vec,
     const double *vec,

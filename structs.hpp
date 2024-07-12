@@ -83,10 +83,13 @@ struct Timers
     Stopwatch *gmres_spmv_wtime;
     Stopwatch *gmres_orthog_wtime;
     Stopwatch *gmres_mgs_wtime;
+    Stopwatch *gmres_mgs_dot_wtime;
+    Stopwatch *gmres_mgs_sub_wtime;
     Stopwatch *gmres_leastsq_wtime;
     Stopwatch *gmres_compute_H_tmp_wtime;
     Stopwatch *gmres_compute_Q_wtime;
     Stopwatch *gmres_compute_R_wtime;
+    Stopwatch *gmres_get_x_wtime;
 };
 
 struct CRSMtxData
@@ -432,6 +435,10 @@ void print(void)
 struct SparseMtxFormat{
 #ifdef USE_USPMV
     ScsData<double, int> *scs_mat;
+#ifdef USE_AP
+    ScsData<double, int> *scs_mat_hp;
+    ScsData<float, int> *scs_mat_lp;
+#endif
     ScsData<double, int> *scs_L;
     ScsData<double, int> *scs_U;
 #endif
@@ -466,6 +473,7 @@ struct argType {
     double beta;
     double *init_v;
     double *V;
+    double *Vy;
     double *H;
     double *H_tmp;
     double *J;

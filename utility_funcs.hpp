@@ -57,10 +57,11 @@ void gmres_get_x(
     double *x,
     double *x_0,
     double *V,
+    double *Vy,
     int n_rows,
     int restart_count,
     int iter_count,
-    int max_gmres_iters
+    int restart_len
 );
 
 void preprocessing(
@@ -139,6 +140,8 @@ void scamac_make_mtx(
 void allocate_structs(
     argType *args
 );
+
+void init_gs_structs(argType *args);
 
 void gmres_allocate_structs(
     argType *args

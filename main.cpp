@@ -88,7 +88,7 @@ int main(int argc, char *argv[]){
         1e-13, // tolerance to stop iterations
         0.1, // init value for b
         3.0, // init value for x
-        15 // GMRES restart length
+        50 // GMRES restart length
     };
 ////////////////////////////////////////////////
 
@@ -98,7 +98,6 @@ int main(int argc, char *argv[]){
     args->sparse_mat = sparse_mat;
     args->gmres_restart_len = loop_params.gmres_restart_len;
     args->coo_mat = coo_mat;
-    args->vec_size = coo_mat->n_cols;
 
     double *x_star;
     double *x_old;
@@ -108,12 +107,12 @@ int main(int argc, char *argv[]){
     double *r;
     double *b;
     double *normed_residuals;
-    
-    allocate_structs(args);
 
     double *init_v;
     double *V;
+    double *Vy;
     double *H;
+    double *H_t;
     double *H_tmp;
     double *J;
     double *R;
@@ -122,23 +121,18 @@ int main(int argc, char *argv[]){
     double *g;
     double *g_copy; 
 
-    if(args->solver_type == "gmres"){
-        gmres_allocate_structs(args);
-    }
-
 #ifdef __CUDACC__
-    // Just give pointers to args struct now, allocate on device later
-    double *d_x_star;
-    double *d_x_new;
-    double *d_x_old;
-    int *d_row_ptr;
-    int *d_col;
-    double *d_val;
-    double *d_tmp;
-    double *d_r;
-    double *d_D;
-    double *d_b;
-    double *d_normed_residuals;
+    double *d_x_star = new double;
+    double *d_x_new = new double;
+    double *d_x_old = new double;
+    int *d_row_ptr = new double;
+    int *d_col = new double;
+    double *d_val = new double;
+    double *d_tmp = new double;
+    double *d_r = new double;
+    double *d_D = new double;
+    double *d_b = new double;
+    double *d_normed_residuals = new double;
 
     args->d_x_star = d_x_star;
     args->d_x_new = d_x_new;
@@ -151,15 +145,20 @@ int main(int argc, char *argv[]){
     args->d_D = d_D;
     args->d_b = d_b;
     args->d_normed_residuals = d_normed_residuals;
-
-    gpu_allocate_structs(args);
 #endif
 
 #ifdef USE_USPMV
     ScsData<double, int> *scs_mat = new ScsData<double, int>;
+    args->sparse_mat->scs_mat = scs_mat;
+#ifdef USE_AP
+    ScsData<double, int> *scs_mat_hp = new ScsData<double, int>;
+    ScsData<float, int> *scs_mat_lp = new ScsData<float, int>;
+    args->sparse_mat->scs_mat_hp = scs_mat_hp;
+    args->sparse_mat->scs_mat_lp = scs_mat_lp;
+#endif
     ScsData<double, int> *scs_L = new ScsData<double, int>;
     ScsData<double, int> *scs_U = new ScsData<double, int>;
-    args->sparse_mat->scs_mat = scs_mat;
+    
     args->sparse_mat->scs_L = scs_L;
     args->sparse_mat->scs_U = scs_U;
 #endif
@@ -202,6 +201,7 @@ int main(int argc, char *argv[]){
     if(args->solver_type == "gmres"){
         delete init_v;
         delete V;
+        delete Vy;
         delete H;
         delete H_tmp;
         delete J;
