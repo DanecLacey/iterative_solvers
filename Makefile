@@ -144,11 +144,11 @@ ifeq ($(USE_GPROF),1)
   PROFFLAGS  += -pg -fno-inline 
 endif
 
-iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
+iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
 endif
 
 # main only depends on funcs, mmio, and structs header, not kernels
@@ -164,6 +164,27 @@ ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) -x cu -c solvers.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o solvers.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c solvers.cpp -o solvers.o
+endif
+
+methods/jacobi.o: methods/jacobi.cpp methods/jacobi.hpp
+ifeq ($(COMPILER),nvcc)
+	nvcc $(CXXFLAGS) -x cu -c methods/jacobi.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/jacobi.o
+else
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/jacobi.cpp -o methods/jacobi.o $(LINK_LIBS) $(HEADERS)
+endif
+
+methods/gauss_seidel.o: methods/gauss_seidel.cpp methods/gauss_seidel.hpp
+ifeq ($(COMPILER),nvcc)
+	nvcc $(CXXFLAGS) -x cu -c methods/gauss_seidel.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gauss_seidel.o
+else
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gauss_seidel.cpp -o methods/gauss_seidel.o $(LINK_LIBS) $(HEADERS)
+endif
+
+methods/gmres.o: methods/gmres.cpp methods/gmres.hpp
+ifeq ($(COMPILER),nvcc)
+	nvcc $(CXXFLAGS) -x cu -c methods/gmres.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gmres.o
+else
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gmres.cpp -o methods/gmres.o $(LINK_LIBS) $(HEADERS)
 endif
 
 # funcs depends on kernels
@@ -199,28 +220,28 @@ else
   endif
 
 #################### Test Suite ####################
-TEST_INC_DIR = /home/danel/iterative_solvers/splitting_type_solvers
+# TEST_INC_DIR = /home/danel/iterative_solvers/splitting_type_solvers
 
-tests: test_suite/catch.o test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.hpp 
-	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.o funcs.o mmio.o kernels.o -o test_suite/tests
-	# -rm *.o
-	# -rm test_suite/*.o
+# tests: test_suite/catch.o test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.hpp 
+# 	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) test_suite/mtx_tests.o test_suite/other_tests.o test_suite/test_data.o test_suite/catch.o funcs.o mmio.o kernels.o -o test_suite/tests
+# 	# -rm *.o
+# 	# -rm test_suite/*.o
 
-test_suite/catch.o: test_suite/catch.cpp test_suite/catch.hpp
-	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/catch.cpp -o test_suite/catch.o
+# test_suite/catch.o: test_suite/catch.cpp test_suite/catch.hpp
+# 	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/catch.cpp -o test_suite/catch.o
 
-# Also need funcs.o here, since we are testing the function implementations
-test_suite/mtx_tests.o: test_suite/mtx_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/mtx_tests.cpp -o test_suite/mtx_tests.o
-
-test_suite/other_tests.o: test_suite/other_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
+# # Also need funcs.o here, since we are testing the function implementations
+# test_suite/mtx_tests.o: test_suite/mtx_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
+# 	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/mtx_tests.cpp -o test_suite/mtx_tests.o
 
 # test_suite/other_tests.o: test_suite/other_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
-# 	$(CXX) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
+# 	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
 
-test_suite/test_data.o: test_suite/test_data.cpp
-	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/test_data.cpp -o test_suite/test_data.o
+# # test_suite/other_tests.o: test_suite/other_tests.cpp test_suite/catch.hpp test_suite/test_data.hpp funcs.o
+# # 	$(CXX) -I$(TEST_INC_DIR) -c test_suite/other_tests.cpp -o test_suite/other_tests.o
+
+# test_suite/test_data.o: test_suite/test_data.cpp
+# 	$(CXX) $(CXXFLAGS) -I$(TEST_INC_DIR) -c test_suite/test_data.cpp -o test_suite/test_data.o
 
 # funcs.o: funcs.cpp funcs.hpp kernels.o structs.hpp kernels.hpp mmio.o
 # 	$(CXX) -c funcs.cpp structs.hpp kernels.cpp kernels.hpp -o funcs.o
