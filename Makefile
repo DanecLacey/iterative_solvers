@@ -1,14 +1,15 @@
 # Options: gcc, icc, icx, nvcc
-COMPILER=gcc
+COMPILER=icx
 # Only applicable for gpu builds
 # Options: a40, a100
-GPGPU_ARCH=a40
+GPGPU_ARCH=
 THREADS_PER_BLOCK=32
 BLOCKS_PER_GRID=256
 
 DEBUG_MODE = 0
 DEBUG_MODE_FINE = 0
 OUTPUT_SPARSITY = 0
+FINE_TIMERS = 0
 
 USE_LIKWID = 0
 USE_EIGEN = 0
@@ -17,10 +18,10 @@ USE_SCAMAC = 0
 
 USE_USPMV = 0
 USE_AP = 0
-AP_THRESHOLD = 0.5
+AP_THRESHOLD = 0 # iter
 CHUNK_SIZE = 1
 SIGMA = 1
-VECTOR_LENGTH = 4 # Assuming AVX instructions
+VECTOR_LENGTH = 8
 
 # TODO
 # USE_METIS = 1
@@ -32,12 +33,12 @@ ifeq ($(COMPILER),gcc)
   CXX       = g++
   OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
-  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH) -g
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
 endif
 
 ifeq ($(COMPILER),icc)
   CXX       = icpc
-  OPT_LEVEL = -Ofast
+  OPT_LEVEL = -O3
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
 ifeq ($(DEBUG_MODE),1)
@@ -47,9 +48,9 @@ endif
 
 ifeq ($(COMPILER),icx)
   CXX       = icpx
-  OPT_LEVEL = -Ofast
+  OPT_LEVEL = -O3
   OPT_ARCH  = -xhost
-  AVX512_fix= #-Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
+  AVX512_fix= -Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
 
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH)
 endif
@@ -86,10 +87,14 @@ ifeq ($(OUTPUT_SPARSITY),1)
   CXXFLAGS += -DOUTPUT_SPARSITY
 endif
 
+ifeq ($(FINE_TIMERS),1)
+  DEBUGFLAGS += -DFINE_TIMERS
+endif
+
 
 ifeq ($(USE_USPMV),1)
   ifeq ($(USE_AP),1)
-    CXXFLAGS += -DUSE_AP -DAP_THRESHOLD
+    CXXFLAGS += -DUSE_AP -DAP_THRESHOLD=$(AP_THRESHOLD)
   endif
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
   ifeq ($(COMPILER),nvcc)
@@ -139,7 +144,7 @@ ifeq ($(USE_GPROF),1)
   PROFFLAGS  += -pg -fno-inline 
 endif
 
-iterative_solvers_scamac: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
+iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else

@@ -2,6 +2,10 @@
 #include "utility_funcs.hpp"
 #include "io_funcs.hpp"
 
+#ifdef USE_LIKWID
+#include <likwid-marker.h>
+#endif
+
 #include <iomanip>
 #include <cmath>
 
@@ -51,7 +55,8 @@ void jacobi_iteration_sep_cpu(
     #pragma omp parallel
     {
 #ifdef USE_USPMV
-        uspmv_omp_scs_cpu<double, int>(
+        // uspmv_omp_scs_cpu<double, int>(
+        uspmv_omp_scs_cpu(
             sparse_mat->scs_mat->C,
             sparse_mat->scs_mat->n_chunks,
             &(sparse_mat->scs_mat->chunk_ptrs)[0],
@@ -197,10 +202,29 @@ void gm_iteration_ref_cpu(
     ///////////////////// SpMV Step /////////////////////
     // w_k = A*v_k (SpMV)
     timers->gmres_spmv_wtime->start_stopwatch();
-    #pragma parallel
-    {
 #ifdef USE_USPMV
-    uspmv_omp_scs_cpu<double, int>(
+
+#ifdef USE_AP
+
+    uspmv_omp_csr_ap_cpu<int>(
+        sparse_mat->scs_mat_hp->n_chunks,
+        sparse_mat->scs_mat_hp->C,
+        &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
+        &(sparse_mat->scs_mat_hp->col_idxs)[0],
+        &(sparse_mat->scs_mat_hp->values)[0],
+        &V[iter_count*n_rows],
+        w,
+        sparse_mat->scs_mat_lp->n_chunks,
+        sparse_mat->scs_mat_lp->C,
+        &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
+        &(sparse_mat->scs_mat_lp->col_idxs)[0],
+        &(sparse_mat->scs_mat_lp->values)[0]
+    );
+
+#else
+    uspmv_omp_csr_cpu(
         sparse_mat->scs_mat->C,
         sparse_mat->scs_mat->n_chunks,
         &(sparse_mat->scs_mat->chunk_ptrs)[0],
@@ -210,12 +234,13 @@ void gm_iteration_ref_cpu(
         &V[iter_count*n_rows],
         w
     );
+#endif
+
 #else
     spmv_crs_cpu(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
 #endif
-    }
+
     timers->gmres_spmv_wtime->end_stopwatch();
-    // exit(1);
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
@@ -228,23 +253,30 @@ void gm_iteration_ref_cpu(
     ///////////////////// Orthogonalization Step /////////////////////
     timers->gmres_orthog_wtime->start_stopwatch();
 
-    // TODO: This will be very bad for performance. Need a tranposed version for subtract
     // For all v \in V
     timers->gmres_mgs_wtime->start_stopwatch();
     for(int j = 0; j <= iter_count; ++j){
         // h_ij <- (w,v)
+#ifdef FINE_TIMERS
         timers->gmres_mgs_dot_wtime->start_stopwatch();
+#endif
         dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+#ifdef FINE_TIMERS
         timers->gmres_mgs_dot_wtime->end_stopwatch(); 
+#endif
 
 #ifdef DEBUG_MODE
         std::cout << "h_" << j << "_" << iter_count << " = " << H[iter_count + j*restart_len] << std::endl;
 #endif
 
         // w_j <- w_j - h_ij*v_k
+#ifdef FINE_TIMERS
         timers->gmres_mgs_sub_wtime->start_stopwatch();
+#endif
         subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+#ifdef FINE_TIMERS
         timers->gmres_mgs_sub_wtime->end_stopwatch();
+#endif
 
 #ifdef DEBUG_MODE
         std::cout << "adjusted_w_" << j << "_rev  = [";
@@ -342,8 +374,9 @@ void gm_iteration_ref_cpu(
         }
     std::cout << "]" << std::endl;
 #endif
-    
+#ifdef FINE_TIMERS
     timers->gmres_compute_H_tmp_wtime->start_stopwatch();
+#endif
     if(iter_count == 0){
         // Just copies H
         // TODO: just need to copy first column
@@ -358,7 +391,9 @@ void gm_iteration_ref_cpu(
         // NOTE: Could cut the indices in half+1, since only an "upper" (lower here) hessenberg matrix mult
         dense_MMM_t_t(Q, H, H_tmp, (restart_len+1), (restart_len+1), restart_len);
     }
+#ifdef FINE_TIMERS
     timers->gmres_compute_H_tmp_wtime->end_stopwatch();
+#endif
 
 #ifdef DEBUG_MODE
     std::cout << "H_tmp_new" << " = [\n";
@@ -415,7 +450,9 @@ void gm_iteration_ref_cpu(
 
     // Combine local Givens rotations with all previous, 
     // i.e. compute Q <- J*Q (dense MMM)
+#ifdef FINE_TIMERS
     timers->gmres_compute_Q_wtime->start_stopwatch();
+#endif
     dense_MMM_t_t(J, Q, Q_copy, (restart_len+1), (restart_len+1), (restart_len+1));
 
     // std::swap(Q_copy, Q);
@@ -426,7 +463,9 @@ void gm_iteration_ref_cpu(
             Q[(restart_len+1)*row_idx + col_idx] = Q_copy[(restart_len+1)*row_idx + col_idx];
         }
     }
+#ifdef FINE_TIMERS
     timers->gmres_compute_Q_wtime->end_stopwatch();
+#endif
 
 #ifdef DEBUG_MODE
     std::cout << "new_Q" << " = [\n";
@@ -441,9 +480,13 @@ void gm_iteration_ref_cpu(
 #endif
 
     // R <- Q*H (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
+#ifdef FINE_TIMERS
     timers->gmres_compute_R_wtime->start_stopwatch();
+#endif
     dense_MMM_t_t(Q, H, R, (restart_len+1), (restart_len+1), restart_len);
+#ifdef FINE_TIMERS
     timers->gmres_compute_R_wtime->end_stopwatch();
+#endif
 
 #ifdef DEBUG_MODE
     std::cout << "R" << " = [\n";
@@ -591,6 +634,23 @@ void solve_cpu(
     }
 #endif
 
+#ifdef USE_LIKWID
+    #pragma omp parallel
+    {
+#ifdef USE_USPMV
+#ifdef USE_AP
+        LIKWID_MARKER_REGISTER("uspmv_ap_crs_benchmark");
+#else
+        LIKWID_MARKER_REGISTER("uspmv_crs_benchmark");
+#endif
+
+#else 
+        LIKWID_MARKER_REGISTER("native_spmv_benchmark");
+#endif
+    }
+#endif
+
+
     do{
 #ifdef DEBUG_MODE
         std::cout << "Restarted GMRES inputting the x vector [" << std::endl;
@@ -684,7 +744,6 @@ void solve_cpu(
                 args->timers->gmres_get_x_wtime->start_stopwatch();
                 gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
                 args->timers->gmres_get_x_wtime->end_stopwatch();
-                // Q: are you getting the right x here?
                 calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->coo_mat->n_cols);
 #ifdef DEBUG_MODE
                 printf("restart residual = [");

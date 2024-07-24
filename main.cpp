@@ -5,12 +5,16 @@
 #include <sys/time.h>
 
 #ifdef USE_EIGEN
-    #include <Eigen/SparseLU>
-    #include <unsupported/Eigen/SparseExtra>
+#include <Eigen/SparseLU>
+#include <unsupported/Eigen/SparseExtra>
+#endif
+
+#ifdef USE_LIKWID
+#include <likwid-marker.h>
 #endif
 
 #ifdef USE_USPMV
-    #include "../Ultimate-SpMV/code/interface.hpp"
+#include "../Ultimate-SpMV/code/interface.hpp"
 #endif
 
 #include "utility_funcs.hpp"
@@ -31,7 +35,7 @@ int main(int argc, char *argv[]){
      *          x_k = (D+L)^{-1}(b - Ux_{k-1}) 
      *      Conjugate Gradient
      *      GMRES(restart length)
-     * until tolerance
+     * until relative tolerance reached
      *      "||b - Ax_k|| / ||b - Ax_0|| < tol"
      * is reached
      * 4. Optionally:
@@ -39,6 +43,12 @@ int main(int argc, char *argv[]){
      *      Report number of iterations and validate A * x_star = b
      *      Export errors per iteration to external text file
      * */
+
+    bogus_init_pin();
+
+#ifdef USE_LIKWID
+    LIKWID_MARKER_INIT;
+#endif
 
     // Declare and init input structs
     argType *args = new argType;
@@ -83,12 +93,12 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        100, // maximum iteration count
+        50000, // maximum iteration count
         0.0, // init stopping criteria
-        1e-13, // tolerance to stop iterations
-        0.1, // init value for b
-        3.0, // init value for x
-        50 // GMRES restart length
+        1e-12, // tolerance to stop iterations
+        1.0, // init value for b
+        0.0, // init value for x
+        110 // GMRES restart length
     };
 ////////////////////////////////////////////////
 
@@ -98,28 +108,6 @@ int main(int argc, char *argv[]){
     args->sparse_mat = sparse_mat;
     args->gmres_restart_len = loop_params.gmres_restart_len;
     args->coo_mat = coo_mat;
-
-    double *x_star;
-    double *x_old;
-    double *x_new;
-    double *tmp;
-    double *D;
-    double *r;
-    double *b;
-    double *normed_residuals;
-
-    double *init_v;
-    double *V;
-    double *Vy;
-    double *H;
-    double *H_t;
-    double *H_tmp;
-    double *J;
-    double *R;
-    double *Q;
-    double *Q_copy;
-    double *g;
-    double *g_copy; 
 
 #ifdef __CUDACC__
     double *d_x_star = new double;
@@ -153,6 +141,7 @@ int main(int argc, char *argv[]){
 #ifdef USE_AP
     ScsData<double, int> *scs_mat_hp = new ScsData<double, int>;
     ScsData<float, int> *scs_mat_lp = new ScsData<float, int>;
+
     args->sparse_mat->scs_mat_hp = scs_mat_hp;
     args->sparse_mat->scs_mat_lp = scs_mat_lp;
 #endif
@@ -189,28 +178,6 @@ int main(int argc, char *argv[]){
     delete coo_mat;
     delete sparse_mat;
     delete args;
-    delete normed_residuals;
-    delete x_star;
-    delete x_old;
-    delete x_new;
-    delete tmp;
-    delete D;
-    delete r;
-    delete b;
-
-    if(args->solver_type == "gmres"){
-        delete init_v;
-        delete V;
-        delete Vy;
-        delete H;
-        delete H_tmp;
-        delete J;
-        delete R;
-        delete Q;
-        delete Q_copy;
-        delete g;
-        delete g_copy;
-    }
 
 #ifdef __CUDACC__
     cudaFree(args->d_x_star);
@@ -224,6 +191,10 @@ int main(int argc, char *argv[]){
     cudaFree(args->d_D);
     cudaFree(args->d_b);
     cudaFree(args->d_normed_residuals);
+#endif
+
+#ifdef USE_LIKWID
+    LIKWID_MARKER_CLOSE;
 #endif
 
     return 0;

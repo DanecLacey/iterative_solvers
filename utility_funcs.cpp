@@ -10,6 +10,7 @@
 #include <vector>
 #include <iomanip>
 #include <set>
+#include <omp.h>
 
 #ifdef USE_EIGEN
 #include <Eigen/Sparse>
@@ -364,7 +365,7 @@ void gmres_get_x(
     for(int row_idx = iter_count; row_idx >= 0; --row_idx){
         for(int col_idx = iter_count; col_idx >= 0; --col_idx){
                 std::cout << std::setw(11);
-                std::cout << R[(row_idx*restart_length) + col_idx]  << ", ";
+                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
             }
             std::cout << "\n";
         }
@@ -532,32 +533,6 @@ void print_x(
     }
 }
 
-void extract_largest_elems(
-    const COOMtxData *coo_mat,
-    std::vector<double> *largest_elems
-){
-    // #pragma omp parallel for schedule (static)
-    // for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
-    //     if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
-    //         (*diag)[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
-    //     }
-    // }
-
-    // #pragma omp parallel for schedule (static)
-    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
-        int row = coo_mat->I[nz_idx];
-        // VT absValue = std::abs(coo_mat->values[nz_idx]);
-        double absValue = std::abs(static_cast<double>(coo_mat->values[nz_idx]));
-
-        // #pragma omp critical
-        // {
-            if (absValue > (*largest_elems)[row]) {
-                (*largest_elems)[row] = absValue;
-            // }
-        }
-    }
-};
-
 void scale_vector(    
     double *vec_to_scale,
     std::vector<double> *largest_elems,
@@ -566,16 +541,6 @@ void scale_vector(
     #pragma omp parallel for schedule (static)
     for (int idx = 0; idx < vec_len; ++idx){
        vec_to_scale[idx] = vec_to_scale[idx] / (*largest_elems)[idx];
-    }
-};
-
-void scale_matrix(
-    COOMtxData *coo_mat,
-    std::vector<double> *largest_elems
-){
-    #pragma omp parallel for schedule (static)
-    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
-        coo_mat->values[nz_idx] = coo_mat->values[nz_idx] / (*largest_elems)[coo_mat->I[nz_idx]];
     }
 };
 
@@ -967,10 +932,100 @@ void gmres_allocate_structs(
     args->restart_count = 0;
 }
 
+void bogus_init_pin(void){
+    
+    // Just to take overhead of pinning away from timers
+    int num_threads;
+    double bogus = 0.0;
+
+    #pragma omp parallel
+    {
+        num_threads = omp_get_num_threads();
+    }
+
+    #pragma omp parallel for
+    for(int i = 0; i < num_threads; ++i){
+        bogus += 1;
+    }
+
+    if(bogus < 100){
+        printf("");
+    }
+}
+
+void extract_largest_row_elems(
+    const COOMtxData *coo_mat,
+    std::vector<double> *largest_row_elems
+){
+    // #pragma omp parallel for schedule (static)
+    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
+        int row = coo_mat->I[nz_idx];
+        // VT absValue = std::abs(coo_mat->values[nz_idx]);
+        double absValue = std::abs(static_cast<double>(coo_mat->values[nz_idx]));
+
+        // #pragma omp critical
+        // {
+            if (absValue > (*largest_row_elems)[row]) {
+                (*largest_row_elems)[row] = absValue;
+            // }
+        }
+    }
+};
+
+void extract_largest_col_elems(
+    const COOMtxData *coo_mat,
+    std::vector<double> *largest_col_elems
+){
+    // #pragma omp parallel for schedule (static)
+    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
+        int col = coo_mat->J[nz_idx];
+        // VT absValue = std::abs(coo_mat->values[nz_idx]);
+        double absValue = std::abs(static_cast<double>(coo_mat->values[nz_idx]));
+
+        // #pragma omp critical
+        // {
+            if (absValue > (*largest_col_elems)[col]) {
+                (*largest_col_elems)[col] = absValue;
+            // }
+        }
+    }
+};
+
+void scale_matrix_rows(
+    COOMtxData *coo_mat,
+    std::vector<double> *largest_row_elems
+){
+    #pragma omp parallel for schedule (static)
+    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
+        coo_mat->values[nz_idx] = coo_mat->values[nz_idx] / (*largest_row_elems)[coo_mat->I[nz_idx]];
+    }
+};
+
+void scale_matrix_cols(
+    COOMtxData *coo_mat,
+    std::vector<double> *largest_col_elems
+){
+    #pragma omp parallel for schedule (static)
+    for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
+        coo_mat->values[nz_idx] = coo_mat->values[nz_idx] / (*largest_col_elems)[coo_mat->J[nz_idx]];
+    }
+};
+
+void equilibrate_matrix(COOMtxData *coo_mat){
+    std::vector<double> largest_row_elems(coo_mat->n_cols, 0.0);
+    extract_largest_row_elems(coo_mat, &largest_row_elems);
+    scale_matrix_rows(coo_mat, &largest_row_elems);
+
+    std::vector<double> largest_col_elems(coo_mat->n_cols, 0.0);
+    extract_largest_col_elems(coo_mat, &largest_col_elems);
+    scale_matrix_cols(coo_mat, &largest_col_elems);
+}
+
 // TODO: MPI preprocessing will go here
 void preprocessing(
     argType *args
 ){
+
 #ifdef OUTPUT_SPARSITY
     // Just to visualize sparsity
     std::string file_out_name = "output_matrix";
@@ -986,6 +1041,15 @@ void preprocessing(
     Stopwatch *preprocessing_wtime = new Stopwatch(preprocessing_start, preprocessing_end);
     args->timers->preprocessing_wtime = preprocessing_wtime;
     args->timers->preprocessing_wtime->start_stopwatch();
+
+    // An optional, but usually necessary preprocessing step
+    std::vector<double> largest_row_elems(args->coo_mat->n_cols, 0.0);
+    extract_largest_row_elems(args->coo_mat, &largest_row_elems);
+    scale_matrix_rows(args->coo_mat, &largest_row_elems);
+
+    std::vector<double> largest_col_elems(args->coo_mat->n_cols, 0.0);
+    extract_largest_col_elems(args->coo_mat, &largest_col_elems);
+    scale_matrix_cols(args->coo_mat, &largest_col_elems);
 
 #ifdef USE_USPMV
     MtxData<double, int> *mtx_mat = new MtxData<double, int>;
@@ -1023,21 +1087,19 @@ void preprocessing(
         init_gs_structs(args);
     }
 
-    std::vector<double> largest_elems(args->vec_size, 0.0);
-    extract_largest_elems(args->coo_mat, &largest_elems);
-
-    // An optional, but usually necessary preprocessing step
-    scale_matrix(args->coo_mat, &largest_elems);
-
 #ifdef USE_USPMV
 
 #ifdef USE_AP
     MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
     MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
-    seperate_lp_from_hp(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_elems, AP_THRESHOLD, true);
+    // MtxData<double, int> *mtx_mat_lp = new MtxData<double, int>;
+    seperate_lp_from_hp(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_row_elems, &largest_col_elems, AP_THRESHOLD, true);
+    args->lp_percent = mtx_mat_lp->nnz / (double)mtx_mat->nnz;
+    args->hp_percent = mtx_mat_hp->nnz / (double)mtx_mat->nnz;
 
     convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
     convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
+    // convert_to_scs<double, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
 
 #endif
 
@@ -1055,11 +1117,11 @@ void preprocessing(
     // Make b vector
     generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
-    scale_vector(args->b, &largest_elems, args->vec_size);
+    scale_vector(args->b, &largest_row_elems, args->vec_size);
 
     // Make initial x vector
     generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
-    scale_vector(args->x_old, &largest_elems, args->vec_size);
+    scale_vector(args->x_old, &largest_row_elems, args->vec_size);
 
 #ifdef USE_USPMV
     // Need to permute these vectors in accordance with SIGMA if using USpMV library
@@ -1092,9 +1154,6 @@ void preprocessing(
 #ifdef __CUDACC__
     gpu_copy_structs(args);
 #endif
-
-    // Precalculate stopping criteria
-    // Easier to just do on the host for now
     calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->coo_mat->n_cols);
 
     if(args->solver_type == "gmres"){
@@ -1119,6 +1178,8 @@ void preprocessing(
     printf("]\n");
 #endif
 
+    // Precalculate stopping criteria
+    // NOTE: Easier to just do on the host for now for GPU
     double norm_r0;
 
     if(args->solver_type == "gmres"){

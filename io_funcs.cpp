@@ -235,6 +235,7 @@ void residuals_output(
 }
 
 void summary_output(
+    argType *args,
     double *residuals_vec, // Here is the problem. Why would you send the entire residuals vec??
     std::string *solver_type,
     LoopParams loop_params,
@@ -253,6 +254,9 @@ void summary_output(
         std::cout << "\n" << *solver_type << " solver did not converge after " << loop_params.max_iters << " iterations." << std::endl;
     }
     std::cout << "With the stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
+#ifdef USE_AP
+    std::cout << "and AP splits: " << 100*args->lp_percent << "\% lp elements and " << 100*args->hp_percent << "\% hp elements" <<  std::endl;
+#endif
     std::cout << "The residual of the final iteration is: ||A*x_star - b||_infty = " <<
     std::scientific << residuals_vec[loop_params.residual_count] << ".\n";
 }
@@ -304,12 +308,16 @@ void print_timers(argType *args){
         spmv_wtime = args->timers->gmres_spmv_wtime->get_wtime();
         orthog_wtime = args->timers->gmres_orthog_wtime->get_wtime();
         mgs_wtime = args->timers->gmres_mgs_wtime->get_wtime();
+#ifdef FINE_TIMERS
         mgs_dot_wtime = args->timers->gmres_mgs_dot_wtime->get_wtime();
         mgs_sub_wtime = args->timers->gmres_mgs_sub_wtime->get_wtime();
+#endif
         leastsq_wtime = args->timers->gmres_leastsq_wtime->get_wtime();
+#ifdef FINE_TIMERS
         compute_H_tmp_wtime = args->timers->gmres_compute_H_tmp_wtime->get_wtime();
         compute_Q_wtime = args->timers->gmres_compute_Q_wtime->get_wtime();
         compute_R_wtime = args->timers->gmres_compute_R_wtime->get_wtime();
+#endif
         get_x_wtime = args->timers->gmres_get_x_wtime->get_wtime();
     }
 
@@ -333,17 +341,21 @@ void print_timers(argType *args){
         std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "               << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "  << std::right << std::setw(right_flush_width) << orthog_wtime  << "[s]" <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  << "[s]" <<std::endl;
+#ifdef FINE_TIMERS 
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  << "[s]" <<std::endl;       
         std::cout << std::left << std::setw(left_flush_width) << "| | | | | Dot: "              << std::right << std::setw(right_flush_width) << mgs_dot_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | | | Sub: "              << std::right << std::setw(right_flush_width) << mgs_sub_wtime  << "[s]" <<std::endl;
         long double orthog_tmp = mgs_wtime;
         std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  << "[s]" <<std::endl;
+#endif
         std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "   << std::right << std::setw(right_flush_width) << leastsq_wtime  << "[s]" <<std::endl;
+#ifdef FINE_TIMERS
         std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "    << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "        << std::right << std::setw(right_flush_width) << compute_Q_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "        << std::right << std::setw(right_flush_width) << compute_R_wtime  << "[s]" <<std::endl;
         long double leastsq_tmp = compute_H_tmp_wtime + compute_Q_wtime + compute_R_wtime; 
         std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp << "[s]" << std::endl;
+#endif
         std::cout << std::left << std::setw(left_flush_width) << "| | | Get x: "               << std::right << std::setw(right_flush_width) << get_x_wtime  << "[s]" <<std::endl;
 
         solver_wtime += get_x_wtime;
@@ -408,6 +420,7 @@ void postprocessing(
 
     if(args->flags->print_summary){
         summary_output(
+            args,
             args->normed_residuals, 
             &args->solver_type, 
             *args->loop_params, 

@@ -80,6 +80,13 @@ void dot(
     int N
 );
 
+void dot_od(
+    const double *vec1,
+    const double *vec2,
+    double *partial_sum,
+    int N
+);
+
 void strided_1_dot(
     const double *vec1,
     const double *vec2,
@@ -107,6 +114,14 @@ void infty_vec_norm_gpu(
 #endif
 
 void subtract_vectors_cpu(
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N,
+    double scale = 1.0
+);
+
+void subtract_vectors_cpu_od(
     double *result_vec,
     const double *vec1,
     const double *vec2,

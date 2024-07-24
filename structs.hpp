@@ -438,6 +438,7 @@ struct SparseMtxFormat{
 #ifdef USE_AP
     ScsData<double, int> *scs_mat_hp;
     ScsData<float, int> *scs_mat_lp;
+    // ScsData<double, int> *scs_mat_lp;
 #endif
     ScsData<double, int> *scs_L;
     ScsData<double, int> *scs_U;
@@ -456,6 +457,11 @@ struct SparseMtxFormat{
 struct argType {
 #ifdef USE_SCAMAC
     char *scamac_args;
+#endif
+
+#ifdef USE_AP
+    double lp_percent;
+    double hp_percent;
 #endif
 
     COOMtxData *coo_mat;

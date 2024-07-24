@@ -8,6 +8,8 @@
 #include "structs.hpp"
 #include "kernels.hpp"
 
+void bogus_init_pin(void);
+
 void generate_vector(
     std::vector<double> *vec_to_populate,
     int size,

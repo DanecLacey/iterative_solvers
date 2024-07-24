@@ -16,6 +16,7 @@ void read_mtx(
 );
 
 void summary_output(
+    argType *args,
     double *residuals_vec,
     std::string *solver_type,
     LoopParams loop_params,

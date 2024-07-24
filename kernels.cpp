@@ -5,6 +5,10 @@
 #include <cmath>
 #include <omp.h>
 
+#ifdef USE_LIKWID
+#include <likwid-marker.h>
+#endif
+
 void mtx_spmv_coo(
     std::vector<double> *y,
     const COOMtxData *mtx,
@@ -73,6 +77,21 @@ void subtract_vectors_cpu(
     int N,
     double scale
 ){
+    // Not an Orphaned directive!
+    #pragma omp parallel for
+    for (int i = 0; i < N; ++i){
+        result_vec[i] = vec1[i] - scale*vec2[i];
+        // std::cout << vec1[i] << " - " << scale << "*" << vec2[i] <<std::endl;
+    }
+}
+
+void subtract_vectors_cpu_od(
+    double *result_vec,
+    const double *vec1,
+    const double *vec2,
+    int N,
+    double scale
+){
     // Orphaned directive: Assumed already called within a parallel region
     #pragma omp for
     for (int i = 0; i < N; ++i){
@@ -102,8 +121,7 @@ void scale(
     const double scalar,
     int N
 ){
-    // Orphaned directive
-    #pragma omp for
+    #pragma omp parallel for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec[i] * scalar;
 #ifdef DEBUG_MODE_FINE
@@ -125,6 +143,18 @@ void dot(
         sum += vec1[i] * vec2[i];
     }
     *result = sum;
+}
+
+void dot_od(
+    const double *vec1,
+    const double *vec2,
+    double *partial_sum,
+    int N
+){
+    #pragma omp for
+    for (int i = 0; i < N; ++i){
+        *partial_sum += vec1[i] * vec2[i];
+    }
 }
 
 void strided_1_dot(
@@ -315,17 +345,25 @@ void spmv_crs_cpu(
 {
     double tmp;
 
-    // Orphaned directive: Assumed already called within a parallel region
-    #pragma omp for schedule (static)
-    for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-        tmp = 0.0;
-        for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
-            tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
-#ifdef DEBUG_MODE_FINE
-            std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+    #pragma omp parallel
+    {
+#ifdef USE_LIKWID
+        LIKWID_MARKER_START("native_spmv_benchmark");
 #endif
+        #pragma omp for schedule(static)
+        for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
+            tmp = 0.0;
+            for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
+                tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
+    #ifdef DEBUG_MODE_FINE
+                std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+    #endif
+            }
+            y[row_idx] = tmp;
         }
-        y[row_idx] = tmp;
+#ifdef USE_LIKWID
+        LIKWID_MARKER_STOP("native_spmv_benchmark");
+#endif
     }
 }
 
@@ -637,19 +675,20 @@ void calc_residual_cpu(
     #pragma omp parallel
     {
 // Theres no reason we need to use SCS for this, right?
-// #ifdef USE_USPMV
-//         uspmv_omp_scs_cpu<double, int>(
-//             sparse_mat->scs_mat->C,
-//             sparse_mat->scs_mat->n_chunks,
-//             &(sparse_mat->scs_mat->chunk_ptrs)[0],
-//             &(sparse_mat->scs_mat->chunk_lengths)[0],
-//             &(sparse_mat->scs_mat->col_idxs)[0],
-//             &(sparse_mat->scs_mat->values)[0],
-//             x,
-//             tmp);
-// #else
+#ifdef USE_USPMV
+        // uspmv_omp_scs_cpu<double, int>(
+        uspmv_omp_scs_cpu(
+            sparse_mat->scs_mat->C,
+            sparse_mat->scs_mat->n_chunks,
+            &(sparse_mat->scs_mat->chunk_ptrs)[0],
+            &(sparse_mat->scs_mat->chunk_lengths)[0],
+            &(sparse_mat->scs_mat->col_idxs)[0],
+            &(sparse_mat->scs_mat->values)[0],
+            x,
+            tmp);
+#else
         spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
-// #endif
+#endif
         subtract_vectors_cpu(r, b, tmp, N);
     }
 }
