@@ -9,33 +9,29 @@
 #include <likwid-marker.h>
 #endif
 
-void solve_cpu(
+void solve_cpu_rf(
     argType *args
 ){
     std::cout << "Entering Solver Harness" << std::endl;
 
+    // Do we need fresh x anymore?
     double *x = new double[args->vec_size];
     double *x_new = new double[args->vec_size];
     double *x_old = new double[args->vec_size];
-    SparseMtxFormat *sparse_mat = args->sparse_mat;
-    Flags *flags = args->flags;
+    // SparseMtxFormat *sparse_mat = args->sparse_mat;
+    // Flags *flags = args->flags;
+    // Solver *solver = args->solver;
     double residual_norm;
 
-    // Need deep copy TODO: rethink and do better
-    #pragma omp parallel for
-    for(int i = 0; i < args->vec_size; ++i){
-        x[i] = args->x_old[i];
-        x_new[i] = args->x_new[i];
-        x_old[i] = args->x_old[i];
-    }
+    args->solver->copy_fresh_x(x, x_new, x_old, args->vec_size);
 
     if(args->flags->print_iters){
-        iter_output(x, args->vec_size, args->loop_params->iter_count);
+        iter_output(args->solver->x_old, args->vec_size, args->loop_params->iter_count);
         printf("\n");
     }
 
     if(args->solver_type == "gmres"){
-        init_gmres_structs(args, args->vec_size);
+        init_gmres_structs(args->solver->gmres_args, args->vec_size);
         init_gmres_timers(args);
     }
 
@@ -65,11 +61,13 @@ void solve_cpu(
 
     do{
 #ifdef DEBUG_MODE
-        std::cout << "Restarted GMRES inputting the x vector [" << std::endl;
-        for(int i = 0; i < args->vec_size; ++i){
-            std::cout << x[i] << std::endl;
+        if(args->solver_type == "gmres"){
+            std::cout << "Restarted GMRES inputting the x vector [" << std::endl;
+            for(int i = 0; i < args->vec_size; ++i){
+                std::cout << x[i] << std::endl;
+            }
+            std::cout << "]" << std::endl;
         }
-        std::cout << "]" << std::endl;
 #endif
 
         args->timers->solver_wtime->start_stopwatch();
@@ -78,10 +76,10 @@ void solve_cpu(
             // For a reference solution, not meant for use with USpMV library
             jacobi_iteration_ref_cpu(
                 args->sparse_mat, 
-                args->D, 
-                args->b, 
-                x_old, 
-                x_new
+                args->solver->D, 
+                args->solver->b, 
+                args->solver->x_old, 
+                args->solver->x_new
             );
             // jacobi_iteration_sep_cpu(sparse_mat, D, b, x_old, x_new, args->vec_size);
         }
@@ -89,32 +87,32 @@ void solve_cpu(
             // For a reference solution, not meant for use with USpMV library
             gs_iteration_ref_cpu(
                 args->sparse_mat, 
-                args->tmp, 
-                args->D, 
-                args->b, 
-                x
+                args->solver->tmp, 
+                args->solver->D, 
+                args->solver->b, 
+                args->solver->x
             );
             // gs_iteration_sep_cpu(sparse_mat, tmp, D, b, x, args->vec_size);
         }
         else if(args->solver_type == "gmres"){
             gmres_iteration_ref_cpu(
-                sparse_mat, 
+                args->sparse_mat, 
                 args->timers,
-                args->V,
-                args->H,
-                args->H_tmp,
-                args->J,
-                args->Q,
-                args->Q_copy,
-                args->tmp, 
-                args->R,
-                args->g,
-                args->g_copy,
-                args->b, 
-                x,
-                args->beta,
+                args->solver->gmres_args->V,
+                args->solver->gmres_args->H,
+                args->solver->gmres_args->H_tmp,
+                args->solver->gmres_args->J,
+                args->solver->gmres_args->Q,
+                args->solver->gmres_args->Q_copy,
+                args->solver->tmp, 
+                args->solver->gmres_args->R,
+                args->solver->gmres_args->g,
+                args->solver->gmres_args->g_copy,
+                args->solver->b, 
+                args->solver->x,
+                args->solver->gmres_args->beta,
                 args->vec_size,
-                args->restart_count,
+                args->solver->gmres_args->restart_count,
                 args->loop_params->iter_count,
                 &residual_norm,
                 args->loop_params->gmres_restart_len
@@ -129,15 +127,19 @@ void solve_cpu(
             //     gmres_get_x(args->R, args->g, x, x_old, args->V, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
             //     args->timers->gmres_get_x_wtime->end_stopwatch();
             // }
-            record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, x, args->b, x_new, args->tmp);
+            record_residual_norm(args, args->flags, args->sparse_mat, &residual_norm, args->solver->r, args->solver->x, args->solver->b, args->solver->x_new, args->solver->tmp);
         }
 
-        if(flags->print_iters)
-            print_x(args, x, x_new, x_old, args->vec_size);  
+        if(args->flags->print_iters)
+            print_x(args, args->solver->x, args->solver->x_new, args->solver->x_old, args->vec_size);  
 
         // Need to swap arrays every iteration in the case of Jacobi solver
-        if(args->solver_type == "jacobi")
-            std::swap(x_new, x_old);
+        if(args->solver_type == "jacobi"){
+            for(int i = 0; i < args->vec_size; ++i){
+                args->solver->x_old[i] = args->solver->x_new[i];
+            }
+        }
+            // std::swap(args->solver->x_new, args->solver->x_old);
 
 #ifdef DEBUG_MODE
         std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
@@ -148,45 +150,56 @@ void solve_cpu(
                 args->loop_params->iter_count >= args->loop_params->max_iters){
                     
             }
-            else if ( (args->loop_params->iter_count+1) % args->gmres_restart_len == 0 ){
+            else if ( (args->loop_params->iter_count+1) % args->solver->gmres_args->gmres_restart_len == 0 ){
                 // Restart GMRES
 #ifdef DEBUG_MODE
                 std::cout << "RESTART GMRES" << std::endl;
 #endif
                 args->timers->gmres_get_x_wtime->start_stopwatch();
-                gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+                gmres_get_x(
+                    args->solver->gmres_args->R, 
+                    args->solver->gmres_args->g, 
+                    args->solver->x, 
+                    args->solver->x_old, 
+                    args->solver->gmres_args->V, 
+                    args->solver->gmres_args->Vy, 
+                    args->coo_mat->n_cols, 
+                    args->solver->gmres_args->restart_count, 
+                    args->loop_params->iter_count, 
+                    args->loop_params->gmres_restart_len
+                );
                 args->timers->gmres_get_x_wtime->end_stopwatch();
-                calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->coo_mat->n_cols);
+                calc_residual_cpu(args->sparse_mat, args->solver->x, args->solver->b, args->solver->r, args->solver->tmp, args->coo_mat->n_cols);
 #ifdef DEBUG_MODE
                 printf("restart residual = [");
                 for(int i = 0; i < args->coo_mat->n_cols; ++i){
-                    std::cout << args->r[i] << ",";
+                    std::cout << args->solver->r[i] << ",";
                 }
                 printf("]\n");
 #endif
-                args->beta = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols); 
-                scale(args->init_v, args->r, 1 / args->beta, args->coo_mat->n_cols);
+                args->solver->gmres_args->beta = euclidean_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols); 
+                scale(args->solver->gmres_args->init_v, args->solver->r, 1 / args->solver->gmres_args->beta, args->coo_mat->n_cols);
     
 #ifdef DEBUG_MODE
-                std::cout << "Restarted Beta = " << args->beta << std::endl;          
+                std::cout << "Restarted Beta = " << args->solver->gmres_args->beta << std::endl;          
 
                 std::cout << "init_v = [";
                     for(int i = 0; i < args->vec_size; ++i){
-                        std::cout << args->init_v[i] << ", ";
+                        std::cout << args->solver->gmres_args->init_v[i] << ", ";
                     }
                 std::cout << "]" << std::endl;
 #endif
-                double norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
+                double norm_r0 = euclidean_vec_norm_cpu(args->solver->r, args->vec_size);
 
 #ifdef DEBUG_MODE
                 printf("restarted norm(initial residual) = %f\n", norm_r0);
 #endif
-                init_gmres_structs(args, args->vec_size);
-                ++args->restart_count;
+                init_gmres_structs(args->solver->gmres_args, args->vec_size);
+                ++args->solver->gmres_args->restart_count;
 #ifdef DEBUG_MODE
                 std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
                 for(int i = 0; i < args->vec_size; ++i){
-                    std::cout << x[i] << std::endl;
+                    std::cout << args->solver->x[i] << std::endl;
                 }
                 std::cout << "]" << std::endl;
 #endif
@@ -194,7 +207,7 @@ void solve_cpu(
                 // Need deep copy TODO: rethink and do better
                 #pragma omp parallel for
                 for(int i = 0; i < args->vec_size; ++i){
-                    x_old[i] = x[i];
+                    args->solver->x_old[i] = args->solver->x[i];
                 }
 
             }
@@ -214,7 +227,7 @@ void solve_cpu(
         // TODO: Bandaid, sincne swapping seems to not work :(
         #pragma omp parallel for
         for(int i = 0; i < args->vec_size; ++i){
-            args->x_star[i] = x_old[i];
+            args->solver->x_star[i] = args->solver->x_old[i];
             // std::cout << "args->x_star[" << i << "] = " << x_old[i] << "==" << args->x_star[i] << std::endl;
         }
         // std::swap(args->x_star, x_old);
@@ -223,7 +236,7 @@ void solve_cpu(
     else if (args->solver_type == "gauss-seidel"){
         #pragma omp parallel for
         for(int i = 0; i < args->vec_size; ++i){
-            args->x_star[i] = x[i];
+            args->solver->x_star[i] = args->solver->x[i];
             // std::cout << "args->x_star[" << i << "] = " << x[i] << "==" << args->x_star[i] << std::endl;
         }
         // std::swap(x, args->x_star);
@@ -237,18 +250,28 @@ void solve_cpu(
         // args->timers->gmres_get_x_wtime->end_stopwatch();
     }
 
-    record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, args->x_star, args->b, args->x_star, args->tmp);
+    record_residual_norm(
+        args, 
+        args->flags, 
+        args->sparse_mat, 
+        &residual_norm, 
+        args->solver->r, 
+        args->solver->x_star, 
+        args->solver->b, 
+        args->solver->x_star, 
+        args->solver->tmp
+    );
 
 #ifdef USE_USPMV
     // Bring final result vector out of permuted space
     double *x_star_perm = new double[args->vec_size];
-    apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    apply_permutation(x_star_perm, args->solver->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
 
     // Deep copy, so you can free memory
     // NOTE: You do not take SCS padding with you! 
     #pragma omp parallel for
     for(int i = 0; i < args->coo_mat->n_cols; ++i){
-        args->x_star[i] = x_star_perm[i];
+        args->solver->x_star[i] = x_star_perm[i];
     }
 
     delete x_star_perm;
@@ -259,84 +282,257 @@ void solve_cpu(
     delete x_old;
 }
 
+// void solve_cpu(
+//     argType *args
+// ){
+//     std::cout << "Entering Solver Harness" << std::endl;
+
+//     double *x = new double[args->vec_size];
+//     double *x_new = new double[args->vec_size];
+//     double *x_old = new double[args->vec_size];
+//     SparseMtxFormat *sparse_mat = args->sparse_mat;
+//     Flags *flags = args->flags;
+//     double residual_norm;
+
+//     // Need deep copy TODO: rethink and do better
+//     #pragma omp parallel for
+//     for(int i = 0; i < args->vec_size; ++i){
+//         x[i] = args->x_old[i];
+//         x_new[i] = args->x_new[i];
+//         x_old[i] = args->x_old[i];
+//     }
+
+//     if(args->flags->print_iters){
+//         iter_output(x, args->vec_size, args->loop_params->iter_count);
+//         printf("\n");
+//     }
+
+//     if(args->solver_type == "gmres"){
+//         init_gmres_structs(args, args->vec_size);
+//         init_gmres_timers(args);
+//     }
+
+// #ifdef DEBUG_MODE
+//     std::cout << "x vector:" << std::endl;
+//     for(int i = 0; i < args->vec_size; ++i){
+//         std::cout << x[i] << std::endl;
+//     }
+// #endif
+
+// #ifdef USE_LIKWID
+//     #pragma omp parallel
+//     {
+// #ifdef USE_USPMV
+// #ifdef USE_AP
+//         LIKWID_MARKER_REGISTER("uspmv_ap_crs_benchmark");
+// #else
+//         LIKWID_MARKER_REGISTER("uspmv_crs_benchmark");
+// #endif
+
+// #else 
+//         LIKWID_MARKER_REGISTER("native_spmv_benchmark");
+// #endif
+//     }
+// #endif
+
+
+//     do{
+// #ifdef DEBUG_MODE
+//         std::cout << "Restarted GMRES inputting the x vector [" << std::endl;
+//         for(int i = 0; i < args->vec_size; ++i){
+//             std::cout << x[i] << std::endl;
+//         }
+//         std::cout << "]" << std::endl;
+// #endif
+
+//         args->timers->solver_wtime->start_stopwatch();
+//         // TODO: change to solver class methods
+//         if(args->solver_type == "jacobi"){
+//             // For a reference solution, not meant for use with USpMV library
+//             jacobi_iteration_ref_cpu(
+//                 args->sparse_mat, 
+//                 args->D, 
+//                 args->b, 
+//                 x_old, 
+//                 x_new
+//             );
+//             // jacobi_iteration_sep_cpu(sparse_mat, D, b, x_old, x_new, args->vec_size);
+//         }
+//         else if(args->solver_type == "gauss-seidel"){
+//             // For a reference solution, not meant for use with USpMV library
+//             gs_iteration_ref_cpu(
+//                 args->sparse_mat, 
+//                 args->tmp, 
+//                 args->D, 
+//                 args->b, 
+//                 x
+//             );
+//             // gs_iteration_sep_cpu(sparse_mat, tmp, D, b, x, args->vec_size);
+//         }
+//         else if(args->solver_type == "gmres"){
+//             gmres_iteration_ref_cpu(
+//                 sparse_mat, 
+//                 args->timers,
+//                 args->V,
+//                 args->H,
+//                 args->H_tmp,
+//                 args->J,
+//                 args->Q,
+//                 args->Q_copy,
+//                 args->tmp, 
+//                 args->R,
+//                 args->g,
+//                 args->g_copy,
+//                 args->b, 
+//                 x,
+//                 args->beta,
+//                 args->vec_size,
+//                 args->restart_count,
+//                 args->loop_params->iter_count,
+//                 &residual_norm,
+//                 args->loop_params->gmres_restart_len
+//             );
+//         }
+//         args->timers->solver_wtime->end_stopwatch();
+
+//         // Record residual every "residual_check_len" iterations
+//         if (args->loop_params->iter_count % args->loop_params->residual_check_len == 0){
+//             // if(args->solver_type == "gmres"){
+//             //     args->timers->gmres_get_x_wtime->start_stopwatch();
+//             //     gmres_get_x(args->R, args->g, x, x_old, args->V, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+//             //     args->timers->gmres_get_x_wtime->end_stopwatch();
+//             // }
+//             record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, x, args->b, x_new, args->tmp);
+//         }
+
+//         if(flags->print_iters)
+//             print_x(args, x, x_new, x_old, args->vec_size);  
+
+//         // Need to swap arrays every iteration in the case of Jacobi solver
+//         if(args->solver_type == "jacobi")
+//             std::swap(x_new, x_old);
+
+// #ifdef DEBUG_MODE
+//         std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
+// #endif 
+//         if(args->solver_type == "gmres"){
+//             // Decide to restart or not 
+//             if(residual_norm <= args->loop_params->stopping_criteria || \
+//                 args->loop_params->iter_count >= args->loop_params->max_iters){
+                    
+//             }
+//             else if ( (args->loop_params->iter_count+1) % args->gmres_restart_len == 0 ){
+//                 // Restart GMRES
+// #ifdef DEBUG_MODE
+//                 std::cout << "RESTART GMRES" << std::endl;
+// #endif
+//                 args->timers->gmres_get_x_wtime->start_stopwatch();
+//                 gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count, args->loop_params->gmres_restart_len);
+//                 args->timers->gmres_get_x_wtime->end_stopwatch();
+//                 calc_residual_cpu(args->sparse_mat, x, args->b, args->r, args->tmp, args->coo_mat->n_cols);
+// #ifdef DEBUG_MODE
+//                 printf("restart residual = [");
+//                 for(int i = 0; i < args->coo_mat->n_cols; ++i){
+//                     std::cout << args->r[i] << ",";
+//                 }
+//                 printf("]\n");
+// #endif
+//                 args->beta = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols); 
+//                 scale(args->init_v, args->r, 1 / args->beta, args->coo_mat->n_cols);
+    
+// #ifdef DEBUG_MODE
+//                 std::cout << "Restarted Beta = " << args->beta << std::endl;          
+
+//                 std::cout << "init_v = [";
+//                     for(int i = 0; i < args->vec_size; ++i){
+//                         std::cout << args->init_v[i] << ", ";
+//                     }
+//                 std::cout << "]" << std::endl;
+// #endif
+//                 double norm_r0 = euclidean_vec_norm_cpu(args->r, args->vec_size);
+
+// #ifdef DEBUG_MODE
+//                 printf("restarted norm(initial residual) = %f\n", norm_r0);
+// #endif
+//                 init_gmres_structs(args, args->vec_size);
+//                 ++args->restart_count;
+// #ifdef DEBUG_MODE
+//                 std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
+//                 for(int i = 0; i < args->vec_size; ++i){
+//                     std::cout << x[i] << std::endl;
+//                 }
+//                 std::cout << "]" << std::endl;
+// #endif
+
+//                 // Need deep copy TODO: rethink and do better
+//                 #pragma omp parallel for
+//                 for(int i = 0; i < args->vec_size; ++i){
+//                     x_old[i] = x[i];
+//                 }
+
+//             }
+//         }
+
+//         ++args->loop_params->iter_count;
+
+
+//         // std::cout << residual_norm << " <? " << args->loop_params->stopping_criteria << std::endl;
+
+//     } while(residual_norm > args->loop_params->stopping_criteria && \
+//     args->loop_params->iter_count < args->loop_params->max_iters);
+
+//     args->flags->convergence_flag = (residual_norm <= args->loop_params->stopping_criteria) ? true : false;
+
+//     if(args->solver_type == "jacobi"){
+//         // TODO: Bandaid, sincne swapping seems to not work :(
+//         #pragma omp parallel for
+//         for(int i = 0; i < args->vec_size; ++i){
+//             args->x_star[i] = x_old[i];
+//             // std::cout << "args->x_star[" << i << "] = " << x_old[i] << "==" << args->x_star[i] << std::endl;
+//         }
+//         // std::swap(args->x_star, x_old);
+
+//     }
+//     else if (args->solver_type == "gauss-seidel"){
+//         #pragma omp parallel for
+//         for(int i = 0; i < args->vec_size; ++i){
+//             args->x_star[i] = x[i];
+//             // std::cout << "args->x_star[" << i << "] = " << x[i] << "==" << args->x_star[i] << std::endl;
+//         }
+//         // std::swap(x, args->x_star);
+//     }    
+    
+//     // Record final residual with approximated solution vector x_star
+//     if(args->solver_type == "gmres"){
+//         // Only needed if you actually want the x vector
+//         // args->timers->gmres_get_x_wtime->start_stopwatch();
+//         // gmres_get_x(args->R, args->g, args->x_star, x_old, args->V, args->coo_mat->n_cols, args->restart_count, args->loop_params->iter_count - 1, args->loop_params->gmres_restart_len);
+//         // args->timers->gmres_get_x_wtime->end_stopwatch();
+//     }
+
+//     record_residual_norm(args, flags, sparse_mat, &residual_norm, args->r, args->x_star, args->b, args->x_star, args->tmp);
+
+// #ifdef USE_USPMV
+//     // Bring final result vector out of permuted space
+//     double *x_star_perm = new double[args->vec_size];
+//     apply_permutation(x_star_perm, args->x_star, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+
+//     // Deep copy, so you can free memory
+//     // NOTE: You do not take SCS padding with you! 
+//     #pragma omp parallel for
+//     for(int i = 0; i < args->coo_mat->n_cols; ++i){
+//         args->x_star[i] = x_star_perm[i];
+//     }
+
+//     delete x_star_perm;
+// #endif
+
+//     delete x;
+//     delete x_new;
+//     delete x_old;
+// }
 
 #ifdef __CUDACC__
-__global__
-void jacobi_iteration_ref_gpu(
-    int *d_row_ptr,
-    int *d_col,
-    double *d_val,
-    double *d_D,
-    double *d_b,
-    double *d_x_old,
-    double *d_x_new,
-    int n_rows
-){
-    double diag_elem = 0;
-    double sum = 0;
-
-    const unsigned int thread_idx_in_block = threadIdx.x;
-    const unsigned int block_offset = blockIdx.x * blockDim.x;
-    const unsigned int thread_idx = block_offset + thread_idx_in_block;
-    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
-    unsigned int offset = 0;
-    unsigned int row_idx;
-
-    while (thread_idx + offset < n_rows){
-        row_idx = thread_idx + offset;
-        sum = 0;
-        for(int nz_idx = d_row_ptr[row_idx]; nz_idx < d_row_ptr[row_idx+1]; ++nz_idx){
-            if(row_idx == d_col[nz_idx]){
-                diag_elem = d_val[nz_idx];
-            }
-            else{
-                sum += d_val[nz_idx] * d_x_old[d_col[nz_idx]];
-#ifdef DEBUG_MODE_FINE
-                printf("%f * %f = %f at index %i\n", d_val[nz_idx], d_x_old[d_col[nz_idx]], d_val[nz_idx] * d_x_old[d_col[nz_idx]], row_idx); 
-#endif
-            }
-        }
-
-        d_x_new[row_idx] = (d_b[row_idx] - sum) / diag_elem;
-
-        offset += stride;        
-    }
-}
-
-
-/*
-    I would think this would allow the easiest library integration, since the SpMV kernel is the same.
-    Except here, you would need some way to avoid opening and closing the two parallel regions.
-*/
-void jacobi_iteration_sep_gpu(
-    int d_n_rows,
-    int *d_row_ptr,
-    int *d_col,
-    double *d_val,
-    double *d_D,
-    double *d_b,
-    double *d_x_old,
-    double *d_x_new
-){
-    int n_rows = d_n_rows;
-#ifdef USE_USPMV
-    if(CHUNK_SIZE > 1 || SIGMA > 1){
-        printf("ERROR: SCS not yet supported in jacobi_iteration_sep_gpu.\n");
-    }
-    uspmv_csr_gpu<double, int><<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(
-        d_n_rows,
-        d_row_ptr,
-        d_col,
-        d_val,
-        d_x_old,
-        d_x_new);
-#else
-    spmv_crs_gpu<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_n_rows, d_row_ptr, d_col, d_val, d_x_old, d_x_new);
-#endif
-    // account for diagonal element in sum, RHS, and division 
-    jacobi_normalize_x_gpu<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_x_new, d_x_old, d_D, d_b, d_n_rows);
-}
-
 void solve_gpu(
     argType *args
 ){
@@ -554,7 +750,7 @@ void solve(
     args->timers->solver_wtime = solver_wtime ;
 
 #ifndef __CUDACC__
-    solve_cpu(args);
+    solve_cpu_rf(args);
 #else
     solve_gpu(args);
 #endif

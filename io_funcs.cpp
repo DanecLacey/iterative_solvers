@@ -382,7 +382,7 @@ void postprocessing(
     // printf("args->x_star[1] = %f\n", (*args->x_star)[1]);
     // printf("args->d_x_star[0] = %f\n", args->d_x_star[0]);
     // printf("args->d_x_star[1] = %f\n", args->d_x_star[1]);
-    cudaMemcpy(args->x_star, args->d_x_star, args->vec_size*sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(args->solver->x_star, args->solver->d_x_star, args->vec_size*sizeof(double), cudaMemcpyDeviceToHost);
     // printf("args->x_star[0] = %f\n", (*args->x_star)[0]);
     // printf("args->x_star[1] = %f\n", (*args->x_star)[1]);
     // printf("args->d_x_star[0] = %f\n", args->d_x_star[0]);

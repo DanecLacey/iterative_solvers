@@ -64,6 +64,13 @@ int main(int argc, char *argv[]){
     std::string matrix_file_name;
     assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
+    Solver *solver = new Solver;
+    Preconditioner *preconditioner = new Preconditioner;
+    gmresArgs *gmres_args = new gmresArgs;
+    args->solver = solver;
+    args->preconditioner = preconditioner;
+    args->solver->gmres_args = gmres_args;
+
     SparseMtxFormat *sparse_mat = new SparseMtxFormat;
     COOMtxData *coo_mat = new COOMtxData;
 
@@ -106,15 +113,15 @@ int main(int argc, char *argv[]){
     args->flags = &flags;
     args->matrix_file_name = &matrix_file_name;
     args->sparse_mat = sparse_mat;
-    args->gmres_restart_len = loop_params.gmres_restart_len;
+    args->solver->gmres_args->gmres_restart_len = loop_params.gmres_restart_len;
     args->coo_mat = coo_mat;
 
 #ifdef __CUDACC__
     double *d_x_star = new double;
     double *d_x_new = new double;
     double *d_x_old = new double;
-    int *d_row_ptr = new double;
-    int *d_col = new double;
+    int *d_row_ptr = new int;
+    int *d_col = new int;
     double *d_val = new double;
     double *d_tmp = new double;
     double *d_r = new double;
@@ -122,16 +129,16 @@ int main(int argc, char *argv[]){
     double *d_b = new double;
     double *d_normed_residuals = new double;
 
-    args->d_x_star = d_x_star;
-    args->d_x_new = d_x_new;
-    args->d_x_old = d_x_old;
-    args->d_row_ptr = d_row_ptr;
-    args->d_col = d_col;
-    args->d_val = d_val;
-    args->d_tmp = d_tmp;
-    args->d_r = d_r;
-    args->d_D = d_D;
-    args->d_b = d_b;
+    args->solver->d_x_star = d_x_star;
+    args->solver->d_x_new = d_x_new;
+    args->solver->d_x_old = d_x_old;
+    args->solver->d_row_ptr = d_row_ptr;
+    args->solver->d_col = d_col;
+    args->solver->d_val = d_val;
+    args->solver->d_tmp = d_tmp;
+    args->solver->d_r = d_r;
+    args->solver->d_D = d_D;
+    args->solver->d_b = d_b;
     args->d_normed_residuals = d_normed_residuals;
 #endif
 
@@ -178,18 +185,20 @@ int main(int argc, char *argv[]){
     delete coo_mat;
     delete sparse_mat;
     delete args;
+    delete solver;
+    delete preconditioner;
 
 #ifdef __CUDACC__
-    cudaFree(args->d_x_star);
-    cudaFree(args->d_x_new);
-    cudaFree(args->d_x_old);
-    cudaFree(args->d_row_ptr);
-    cudaFree(args->d_col);
-    cudaFree(args->d_val);
-    cudaFree(args->d_tmp);
-    cudaFree(args->d_r);
-    cudaFree(args->d_D);
-    cudaFree(args->d_b);
+    cudaFree(args->solver->d_x_star);
+    cudaFree(args->solver->d_x_new);
+    cudaFree(args->solver->d_x_old);
+    cudaFree(args->solver->d_row_ptr);
+    cudaFree(args->solver->d_col);
+    cudaFree(args->solver->d_val);
+    cudaFree(args->solver->d_tmp);
+    cudaFree(args->solver->d_r);
+    cudaFree(args->solver->d_D);
+    cudaFree(args->solver->d_b);
     cudaFree(args->d_normed_residuals);
 #endif
 

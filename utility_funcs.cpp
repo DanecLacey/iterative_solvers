@@ -418,40 +418,40 @@ void gmres_get_x(
 }
 
 void init_gmres_structs(
-    argType *args,
+    gmresArgs *gmres_args,
     int n_rows
 ){
-    int restart_len = args->gmres_restart_len;
+    int restart_len = gmres_args->gmres_restart_len;
     
     #pragma omp parallel
     {
-        init(args->V, 0.0, n_rows * (restart_len+1));
+        init(gmres_args->V, 0.0, n_rows * (restart_len+1));
 
         // Give v0 to first row of V
         #pragma omp for
         for(int i = 0; i < n_rows; ++i){
-            args->V[i] = args->init_v[i];
+            gmres_args->V[i] = gmres_args->init_v[i];
         }
     }
     
-    init(args->H, 0.0, restart_len * (restart_len+1));
+    init(gmres_args->H, 0.0, restart_len * (restart_len+1));
 
     #pragma omp parallel
     {
-        init(args->Vy, 0.0, n_rows);
+        init(gmres_args->Vy, 0.0, n_rows);
     }
     
-    init_identity(args->R, 0.0, restart_len, (restart_len+1));
+    init_identity(gmres_args->R, 0.0, restart_len, (restart_len+1));
     
-    init_identity(args->Q, 0.0, (restart_len+1), (restart_len+1));
+    init_identity(gmres_args->Q, 0.0, (restart_len+1), (restart_len+1));
 
-    init_identity(args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
+    init_identity(gmres_args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
 
-    init(args->g, 0.0, restart_len+1);
-    args->g[0] = args->beta; // <- supply starting element
+    init(gmres_args->g, 0.0, restart_len+1);
+    gmres_args->g[0] = gmres_args->beta; // <- supply starting element
     
-    init(args->g_copy, 0.0, restart_len+1);
-    args->g_copy[0] = args->beta; // <- supply starting element
+    init(gmres_args->g_copy, 0.0, restart_len+1);
+    gmres_args->g_copy[0] = gmres_args->beta; // <- supply starting element
 }
 
 void record_residual_norm(
@@ -528,7 +528,18 @@ void print_x(
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
     if(args->solver_type == "gmres"){
-        gmres_get_x(args->R, args->g, x, x_old, args->V, args->Vy, n_rows, args->restart_count, args->loop_params->iter_count, args->gmres_restart_len);
+        gmres_get_x(
+            args->solver->gmres_args->R, 
+            args->solver->gmres_args->g, 
+            x, 
+            x_old, 
+            args->solver->gmres_args->V, 
+            args->solver->gmres_args->Vy, 
+            n_rows, 
+            args->solver->gmres_args->restart_count, 
+            args->loop_params->iter_count, 
+            args->solver->gmres_args->gmres_restart_len
+        );
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
 }
@@ -639,37 +650,37 @@ void init_gs_structs(argType *args){
 void gpu_allocate_structs(
     argType *args
 ){
-    cudaMalloc(&(args->d_x_star), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_new), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_x_old), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_tmp), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_D), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_r), (args->vec_size)*sizeof(double));
-    cudaMalloc(&(args->d_b), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_x_star), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_x_new), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_x_old), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_tmp), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_D), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_r), (args->vec_size)*sizeof(double));
+    cudaMalloc(&(args->solver->d_b), (args->vec_size)*sizeof(double));
     cudaMalloc(&(args->d_normed_residuals), (args->loop_params->max_iters / args->loop_params->residual_check_len + 1)*sizeof(double));
 }
 
 void gpu_allocate_copy_sparse_mat(
     argType *args
 ){
-    cudaMalloc(&(args->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
-    cudaMalloc(&(args->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
-    cudaMalloc(&(args->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
-    cudaMemcpy(args->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMalloc(&(args->solver->d_row_ptr), (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int));
+    cudaMalloc(&(args->solver->d_col), (args->sparse_mat->crs_mat->nnz)*sizeof(int));
+    cudaMalloc(&(args->solver->d_val), (args->sparse_mat->crs_mat->nnz)*sizeof(double));
+    cudaMemcpy(args->solver->d_row_ptr, &(args->sparse_mat->crs_mat->row_ptr)[0], (args->sparse_mat->crs_mat->n_rows+1)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_col, &(args->sparse_mat->crs_mat->col)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_val, &(args->sparse_mat->crs_mat->val)[0], (args->sparse_mat->crs_mat->nnz)*sizeof(double), cudaMemcpyHostToDevice);
 }
 
 void gpu_copy_structs(
     argType *args
 ){
-    cudaMemcpy(args->d_x_star, args->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_new, args->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_x_old, args->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_tmp, args->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_D, args->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_r, args->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(args->d_b, args->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_x_star, args->solver->x_star, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_x_new, args->solver->x_new, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_x_old, args->solver->x_old, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_tmp, args->solver->tmp, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_D, args->solver->D, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_r, args->solver->r, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(args->solver->d_b, args->solver->b, args->vec_size*sizeof(double), cudaMemcpyHostToDevice);
 }
 
 #endif
@@ -892,13 +903,13 @@ void allocate_structs(
     double *b = new double[args->vec_size];
     double *normed_residuals = new double[args->loop_params->max_iters / args->loop_params->residual_check_len + 1];
 
-    args->x_star = x_star;
-    args->x_old = x_old;
-    args->x_new = x_new;
-    args->tmp = tmp;
-    args->D = D;
-    args->r = r;
-    args->b = b;
+    args->solver->x_star = x_star;
+    args->solver->x_old = x_old;
+    args->solver->x_new = x_new;
+    args->solver->tmp = tmp;
+    args->solver->D = D;
+    args->solver->r = r;
+    args->solver->b = b;
     args->normed_residuals = normed_residuals;
 }
 
@@ -918,18 +929,18 @@ void gmres_allocate_structs(
     double *g = new double[args->loop_params->gmres_restart_len+1];
     double *g_copy = new double[args->loop_params->gmres_restart_len+1];
 
-    args->init_v = init_v;
-    args->V = V;
-    args->Vy = Vy;
-    args->H = H;
-    args->H_tmp = H_tmp;
-    args->J = J;
-    args->R = R;
-    args->Q = Q;
-    args->Q_copy = Q_copy;
-    args->g = g;
-    args->g_copy = g_copy;
-    args->restart_count = 0;
+    args->solver->gmres_args->init_v = init_v;
+    args->solver->gmres_args->V = V;
+    args->solver->gmres_args->Vy = Vy;
+    args->solver->gmres_args->H = H;
+    args->solver->gmres_args->H_tmp = H_tmp;
+    args->solver->gmres_args->J = J;
+    args->solver->gmres_args->R = R;
+    args->solver->gmres_args->Q = Q;
+    args->solver->gmres_args->Q_copy = Q_copy;
+    args->solver->gmres_args->g = g;
+    args->solver->gmres_args->g_copy = g_copy;
+    args->solver->gmres_args->restart_count = 0;
 }
 
 void bogus_init_pin(void){
@@ -1112,16 +1123,16 @@ void preprocessing(
     gpu_allocate_copy_sparse_mat(args);
 #endif
 
-    extract_diag(args->coo_mat, args->D);
+    extract_diag(args->coo_mat, args->solver->D);
 
     // Make b vector
-    generate_vector(args->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
+    generate_vector(args->solver->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
-    scale_vector(args->b, &largest_row_elems, args->vec_size);
+    scale_vector(args->solver->b, &largest_row_elems, args->vec_size);
 
     // Make initial x vector
-    generate_vector(args->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
-    scale_vector(args->x_old, &largest_row_elems, args->vec_size);
+    generate_vector(args->solver->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
+    scale_vector(args->solver->x_old, &largest_row_elems, args->vec_size);
 
 #ifdef USE_USPMV
     // Need to permute these vectors in accordance with SIGMA if using USpMV library
@@ -1130,20 +1141,20 @@ void preprocessing(
     // std::swap(D_perm, args->D);
 
     double *b_perm = new double [args->vec_size];
-    apply_permutation(b_perm, args->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    apply_permutation(b_perm, args->solver->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
     // std::swap(b_perm, args->b);
 
     // NOTE: Permuted w.r.t. columns due to symmetric permutation
     double *x_old_perm = new double[args->vec_size];
-    apply_permutation(x_old_perm, args->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
+    apply_permutation(x_old_perm, args->solver->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
     // std::swap(x_old_perm, args->x_old);
 
     // Deep copy, so you can free memory
     // TODO: wrap in func
     for(int i = 0; i < args->vec_size; ++i){
-        args->D[i] = D_perm[i]; // ?? Double Check!
-        args->b[i] = b_perm[i]; // ?? Double Check!
-        args->x_old[i] = x_old_perm[i];
+        args->solver->D[i] = D_perm[i]; // ?? Double Check!
+        args->solver->b[i] = b_perm[i]; // ?? Double Check!
+        args->solver->x_old[i] = x_old_perm[i];
     }
 
     delete D_perm;
@@ -1154,17 +1165,17 @@ void preprocessing(
 #ifdef __CUDACC__
     gpu_copy_structs(args);
 #endif
-    calc_residual_cpu(args->sparse_mat, args->x_old, args->b, args->r, args->tmp, args->coo_mat->n_cols);
+    calc_residual_cpu(args->sparse_mat, args->solver->x_old, args->solver->b, args->solver->r, args->solver->tmp, args->coo_mat->n_cols);
 
     if(args->solver_type == "gmres"){
-        args->beta = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols);
-        scale(args->init_v, args->r, 1 / args->beta, args->coo_mat->n_cols);
+        args->solver->gmres_args->beta = euclidean_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
+        scale(args->solver->gmres_args->init_v, args->solver->r, 1 / args->solver->gmres_args->beta, args->coo_mat->n_cols);
 
 #ifdef DEBUG_MODE
-        std::cout << "Beta = " << args->beta << std::endl;
+        std::cout << "Beta = " << args->solver->gmres_args->beta << std::endl;
         std::cout << "init_v = [";
             for(int i = 0; i < args->coo_mat->n_cols; ++i){
-                std::cout << args->init_v[i] << ", ";
+                std::cout << args->solver->gmres_args->init_v[i] << ", ";
             }
         std::cout << "]" << std::endl;
 #endif
@@ -1173,7 +1184,7 @@ void preprocessing(
 #ifdef DEBUG_MODE
     printf("initial residual = [");
     for(int i = 0; i < args->coo_mat->n_cols; ++i){
-        std::cout << args->r[i] << ",";
+        std::cout << args->solver->r[i] << ",";
     }
     printf("]\n");
 #endif
@@ -1183,10 +1194,10 @@ void preprocessing(
     double norm_r0;
 
     if(args->solver_type == "gmres"){
-        norm_r0 = euclidean_vec_norm_cpu(args->r, args->coo_mat->n_cols);
+        norm_r0 = euclidean_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
     }
     else{
-        norm_r0 = infty_vec_norm_cpu(args->r, args->coo_mat->n_cols);
+        norm_r0 = infty_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
     }
     args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
 

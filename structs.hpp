@@ -12,7 +12,6 @@
 #include "mmio.h"
 
 
-
 // NOTE: Is not having default bools really bad?
 struct Flags
 {
@@ -448,11 +447,94 @@ struct SparseMtxFormat{
     CRSMtxData *crs_U;
 };
 
-// #ifdef USE_USPMV
-//     scsArgType scs_args
-// #else
-//     crsArgType crs_args
-// #endif
+struct gmresArgs
+{
+    double beta;
+    double *init_v;
+    double *V;
+    double *Vy;
+    double *H;
+    double *H_tmp;
+    double *J;
+    double *R;
+    double *Q;
+    double *Q_copy;
+    double *g;
+    double *g_copy;
+    int restart_count;
+    int gmres_restart_len;
+};
+
+class Solver
+{
+    /*
+    Data: 
+        x
+        x_old
+        x_new
+        all gmres args
+    Methods:
+        get x
+        print x
+        calc residual
+        init structs
+        init timers
+        register likwid markers
+        iterate
+        record residual norm
+    */ 
+public:
+    double *x_star;
+    double *x_new;
+    double *x_old;
+    double *x;
+    double *tmp;
+    double *D;
+    double *r;
+    double *b;
+
+    gmresArgs *gmres_args;
+
+#ifdef __CUDACC__
+    double *d_x_star; 
+    double *d_x_new;
+    double *d_x_old;
+    int *d_row_ptr;
+    int *d_col;
+    double *d_val; 
+    double *d_tmp;
+    double *d_r;
+    double *d_D;
+    double *d_b;
+#endif
+
+    void copy_fresh_x(
+        double *fresh_x,
+        double *fresh_x_new,
+        double *fresh_x_old,
+        int N
+    ){
+        // Need deep copy TODO: rethink and do better
+        #pragma omp parallel for
+        for(int i = 0; i < N; ++i){
+            fresh_x[i] = this->x_old[i];
+            fresh_x_new[i] = this->x_new[i];
+            fresh_x_old[i] = this->x_old[i];
+        }
+
+        this->x = fresh_x;
+        this->x_new = fresh_x_new;
+        this->x_old = fresh_x_old;       
+    }
+};
+
+class Preconditioner
+{
+    /*
+        TODO
+    */
+
+};
 
 struct argType {
 #ifdef USE_SCAMAC
@@ -467,28 +549,18 @@ struct argType {
     COOMtxData *coo_mat;
     SparseMtxFormat *sparse_mat;
     Timers *timers;
-    double *x_star;
-    double *x_new;
-    double *x_old;
-    double *tmp;
-    double *D;
-    double *r;
-    double *b;
+    Solver *solver;
+    Preconditioner *preconditioner;
+
+    // double *x_star;
+    // double *x_new;
+    // double *x_old;
+
     
-    // gmres args
-    double beta;
-    double *init_v;
-    double *V;
-    double *Vy;
-    double *H;
-    double *H_tmp;
-    double *J;
-    double *R;
-    double *Q;
-    double *Q_copy;
-    double *g;
-    double *g_copy;
     double *normed_residuals;
+#ifdef __CUDACC__
+    double *d_normed_residuals;
+#endif
     LoopParams *loop_params;
     std::string solver_type;
     Flags *flags;
@@ -496,21 +568,8 @@ struct argType {
     double calc_time_elapsed;
     double total_time_elapsed;
     int vec_size;
-    int restart_count;
-    int gmres_restart_len;
-
-#ifdef __CUDACC__
-    double *d_x_star; 
-    double *d_x_new;
-    double *d_x_old;
-    int *d_row_ptr;
-    int *d_col;
-    double *d_val; 
-    double *d_tmp;
-    double *d_r;
-    double *d_D;
-    double *d_b;
-    double *d_normed_residuals;
-#endif
 };
+
+
+
 #endif /*STRUCTS_H*/

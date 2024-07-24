@@ -71,7 +71,7 @@ void preprocessing(
 );
 
 void init_gmres_structs(
-    argType *args,
+    gmresArgs *gmres_args,
     int n_rows
 );
 
