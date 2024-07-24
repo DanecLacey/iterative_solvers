@@ -335,125 +335,6 @@ void convert_to_crs(
     delete[] nnzPerRow;
 }
 
-void gmres_get_x(
-    double *R,
-    double *g,
-    double *x,
-    double *x_0,
-    double *V,
-    double *Vy,
-    int n_rows,
-    int restart_count,
-    int iter_count,
-    int restart_len
-){
-    std::vector<double> y(restart_len, 0.0);
-
-    double diag_elem = 0.0;
-    double sum;
-
-    // Adjust for restarting
-    iter_count -= restart_count* restart_len;
-
-#ifdef DEBUG_MODE
-    std::cout << "gmres_get_x iter_count = " << iter_count << std::endl;
-    std::cout << "gmres_get_x restart_count = " << restart_count << std::endl;
-#endif
-
-#ifdef DEBUG_MODE
-    std::cout << "when solving for x, R" << " = [\n";
-    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
-        for(int col_idx = iter_count; col_idx >= 0; --col_idx){
-                std::cout << std::setw(11);
-                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
-            }
-            std::cout << "\n";
-        }
-    std::cout << "]" << std::endl;
-#endif
-
-    // (dense) Backward triangular solve Ry = g ((m+1 x m)(m x 1) = (m+1 x 1))
-    // Traverse R \in \mathbb{R}^(m+1 x m) from last to first row
-    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
-        sum = 0.0;
-        for(int col_idx = row_idx; col_idx < restart_len; ++col_idx){
-            if(row_idx == col_idx){
-                diag_elem = R[(row_idx*restart_len) + col_idx];
-            }
-            else{
-                sum += R[(row_idx*restart_len) + col_idx] * y[col_idx];
-            }
-            
-        }
-        y[row_idx] = (g[row_idx] - sum) / diag_elem;
-#ifdef DEBUG_MODE_FINE
-        std::cout << g[row_idx] << " - " << sum << " / " << diag_elem << std::endl; 
-#endif
-    }
-
-#ifdef DEBUG_MODE
-    std::cout << "y_" << iter_count << " = [\n";
-    for(int i = 0; i < restart_len; ++i){
-        std::cout << y[i]  << ", ";
-    }
-    std::cout << "]" << std::endl;
-#endif
-
-    // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
-    dense_MMM_t(V, &y[0], Vy, n_rows, restart_len, 1);
-
-#ifdef DEBUG_MODE
-    std::cout << "Vy_" << iter_count << " = [\n";
-    for(int i = 0; i < n_rows; ++i){
-        std::cout << Vy[i]  << ", ";
-    }
-    std::cout << "]" << std::endl;
-#endif
-
-    // Finally, solve for x ((n x 1) = (n x 1) + (n x m)(m x 1))
-    for(int i = 0; i < n_rows; ++i){
-        x[i] = x_0[i] + Vy[i];
-        // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
-    }
-}
-
-void init_gmres_structs(
-    gmresArgs *gmres_args,
-    int n_rows
-){
-    int restart_len = gmres_args->gmres_restart_len;
-    
-    #pragma omp parallel
-    {
-        init(gmres_args->V, 0.0, n_rows * (restart_len+1));
-
-        // Give v0 to first row of V
-        #pragma omp for
-        for(int i = 0; i < n_rows; ++i){
-            gmres_args->V[i] = gmres_args->init_v[i];
-        }
-    }
-    
-    init(gmres_args->H, 0.0, restart_len * (restart_len+1));
-
-    #pragma omp parallel
-    {
-        init(gmres_args->Vy, 0.0, n_rows);
-    }
-    
-    init_identity(gmres_args->R, 0.0, restart_len, (restart_len+1));
-    
-    init_identity(gmres_args->Q, 0.0, (restart_len+1), (restart_len+1));
-
-    init_identity(gmres_args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
-
-    init(gmres_args->g, 0.0, restart_len+1);
-    gmres_args->g[0] = gmres_args->beta; // <- supply starting element
-    
-    init(gmres_args->g_copy, 0.0, restart_len+1);
-    gmres_args->g_copy[0] = gmres_args->beta; // <- supply starting element
-}
-
 void record_residual_norm(
     argType *args,
     Flags *flags,
@@ -538,7 +419,7 @@ void print_x(
             n_rows, 
             args->solver->gmres_args->restart_count, 
             args->loop_params->iter_count, 
-            args->solver->gmres_args->gmres_restart_len
+            args->solver->gmres_args->restart_length
         );
         iter_output(x, args->vec_size, args->loop_params->iter_count);
     }
@@ -554,96 +435,6 @@ void scale_vector(
        vec_to_scale[idx] = vec_to_scale[idx] / (*largest_elems)[idx];
     }
 };
-
-void init_gmres_timers(argType *args){
-    timeval *gmres_spmv_start = new timeval;
-    timeval *gmres_spmv_end = new timeval;
-    Stopwatch *gmres_spmv_wtime = new Stopwatch(gmres_spmv_start, gmres_spmv_end);
-    args->timers->gmres_spmv_wtime = gmres_spmv_wtime;
-
-    timeval *gmres_orthog_start = new timeval;
-    timeval *gmres_orthog_end = new timeval;
-    Stopwatch *gmres_orthog_wtime = new Stopwatch(gmres_orthog_start, gmres_orthog_end);
-    args->timers->gmres_orthog_wtime = gmres_orthog_wtime;
-
-    timeval *gmres_mgs_start = new timeval;
-    timeval *gmres_mgs_end = new timeval;
-    Stopwatch *gmres_mgs_wtime = new Stopwatch(gmres_mgs_start, gmres_mgs_end);
-    args->timers->gmres_mgs_wtime = gmres_mgs_wtime;
-
-    timeval *gmres_mgs_dot_start = new timeval;
-    timeval *gmres_mgs_dot_end = new timeval;
-    Stopwatch *gmres_mgs_dot_wtime = new Stopwatch(gmres_mgs_dot_start, gmres_mgs_dot_end);
-    args->timers->gmres_mgs_dot_wtime = gmres_mgs_dot_wtime;
-
-    timeval *gmres_mgs_sub_start = new timeval;
-    timeval *gmres_mgs_sub_end = new timeval;
-    Stopwatch *gmres_mgs_sub_wtime = new Stopwatch(gmres_mgs_sub_start, gmres_mgs_sub_end);
-    args->timers->gmres_mgs_sub_wtime = gmres_mgs_sub_wtime;
-
-    timeval *gmres_leastsq_start = new timeval;
-    timeval *gmres_leastsq_end = new timeval;
-    Stopwatch *gmres_leastsq_wtime = new Stopwatch(gmres_leastsq_start, gmres_leastsq_end);
-    args->timers->gmres_leastsq_wtime = gmres_leastsq_wtime;
-
-    timeval *gmres_compute_H_tmp_start = new timeval;
-    timeval *gmres_compute_H_tmp_end = new timeval;
-    Stopwatch *gmres_compute_H_tmp_wtime = new Stopwatch(gmres_compute_H_tmp_start, gmres_compute_H_tmp_end);
-    args->timers->gmres_compute_H_tmp_wtime = gmres_compute_H_tmp_wtime;
-
-    timeval *gmres_compute_Q_start = new timeval;
-    timeval *gmres_compute_Q_end = new timeval;
-    Stopwatch *gmres_compute_Q_wtime = new Stopwatch(gmres_compute_Q_start, gmres_compute_Q_end);
-    args->timers->gmres_compute_Q_wtime = gmres_compute_Q_wtime;
-
-    timeval *gmres_compute_R_start = new timeval;
-    timeval *gmres_compute_R_end = new timeval;
-    Stopwatch *gmres_compute_R_wtime = new Stopwatch(gmres_compute_R_start, gmres_compute_R_end);
-    args->timers->gmres_compute_R_wtime = gmres_compute_R_wtime;
-
-    timeval *gmres_get_x_start = new timeval;
-    timeval *gmres_get_x_end = new timeval;
-    Stopwatch *gmres_get_x_wtime = new Stopwatch(gmres_get_x_start, gmres_get_x_end);
-    args->timers->gmres_get_x_wtime = gmres_get_x_wtime;
-}
-
-void init_gs_structs(argType *args){
-    COOMtxData *coo_L = new COOMtxData;
-    COOMtxData *coo_U = new COOMtxData;
-
-    split_L_U(args->coo_mat, coo_L, coo_U);
-
-#ifdef USE_USPMV
-    // Only used for GS kernel
-    // TODO: Find a better solution than this crap
-    MtxData<double, int> *mtx_L = new MtxData<double, int>;
-    mtx_L->n_rows = coo_L->n_rows;
-    mtx_L->n_cols = coo_L->n_cols;
-    mtx_L->nnz = coo_L->nnz;
-    mtx_L->is_sorted = true; //TODO
-    mtx_L->is_symmetric = false; //TODO
-    mtx_L->I = coo_L->I;
-    mtx_L->J = coo_L->J;
-    mtx_L->values = coo_L->values;
-    convert_to_scs<double, int>(mtx_L, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_L);
-
-    MtxData<double, int> *mtx_U = new MtxData<double, int>;
-    mtx_U->n_rows = coo_U->n_rows;
-    mtx_U->n_cols = coo_U->n_cols;
-    mtx_U->nnz = coo_U->nnz;
-    mtx_U->is_sorted = true; //TODO
-    mtx_U->is_symmetric = false; //TODO
-    mtx_U->I = coo_U->I;
-    mtx_U->J = coo_U->J;
-    mtx_U->values = coo_U->values;
-    convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_U);
-#endif
-    convert_to_crs(coo_L, args->sparse_mat->crs_L);
-    convert_to_crs(coo_U, args->sparse_mat->crs_U);
-
-    delete coo_L;
-    delete coo_U;
-}
 
 #ifdef __CUDACC__
 
@@ -913,36 +704,6 @@ void allocate_structs(
     args->normed_residuals = normed_residuals;
 }
 
-void gmres_allocate_structs(
-    argType *args
-){
-    std::cout << "Allocating space for GMRES structs" << std::endl;
-    double *init_v = new double[args->vec_size];
-    double *V = new double[args->vec_size * (args->loop_params->gmres_restart_len+1)]; // (m x n)
-    double *Vy = new double[args->vec_size]; // (m x 1)
-    double *H = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m) 
-    double *H_tmp = new double[(args->loop_params->gmres_restart_len+1) * args->loop_params->gmres_restart_len]; // (m+1 x m)
-    double *J = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)];
-    double *R = new double[args->loop_params->gmres_restart_len * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m)
-    double *Q = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
-    double *Q_copy = new double[(args->loop_params->gmres_restart_len+1) * (args->loop_params->gmres_restart_len+1)]; // (m+1 x m+1)
-    double *g = new double[args->loop_params->gmres_restart_len+1];
-    double *g_copy = new double[args->loop_params->gmres_restart_len+1];
-
-    args->solver->gmres_args->init_v = init_v;
-    args->solver->gmres_args->V = V;
-    args->solver->gmres_args->Vy = Vy;
-    args->solver->gmres_args->H = H;
-    args->solver->gmres_args->H_tmp = H_tmp;
-    args->solver->gmres_args->J = J;
-    args->solver->gmres_args->R = R;
-    args->solver->gmres_args->Q = Q;
-    args->solver->gmres_args->Q_copy = Q_copy;
-    args->solver->gmres_args->g = g;
-    args->solver->gmres_args->g_copy = g_copy;
-    args->solver->gmres_args->restart_count = 0;
-}
-
 void bogus_init_pin(void){
     
     // Just to take overhead of pinning away from timers
@@ -1090,13 +851,7 @@ void preprocessing(
     gpu_allocate_structs(args);
 #endif
 
-    if(args->solver_type == "gmres"){
-        gmres_allocate_structs(args);
-        init_gmres_timers(args);
-    }
-    if(args->solver_type == "gauss-seidel"){
-        init_gs_structs(args);
-    }
+    args->solver->allocate_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
 #ifdef USE_USPMV
 
@@ -1110,8 +865,6 @@ void preprocessing(
 
     convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
     convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
-    // convert_to_scs<double, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
-
 #endif
 
 #else
@@ -1167,19 +920,8 @@ void preprocessing(
 #endif
     calc_residual_cpu(args->sparse_mat, args->solver->x_old, args->solver->b, args->solver->r, args->solver->tmp, args->coo_mat->n_cols);
 
-    if(args->solver_type == "gmres"){
-        args->solver->gmres_args->beta = euclidean_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
-        scale(args->solver->gmres_args->init_v, args->solver->r, 1 / args->solver->gmres_args->beta, args->coo_mat->n_cols);
+    args->solver->init_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
-#ifdef DEBUG_MODE
-        std::cout << "Beta = " << args->solver->gmres_args->beta << std::endl;
-        std::cout << "init_v = [";
-            for(int i = 0; i < args->coo_mat->n_cols; ++i){
-                std::cout << args->solver->gmres_args->init_v[i] << ", ";
-            }
-        std::cout << "]" << std::endl;
-#endif
-    }
 
 #ifdef DEBUG_MODE
     printf("initial residual = [");

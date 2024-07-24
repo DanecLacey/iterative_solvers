@@ -433,7 +433,7 @@ void postprocessing(
 #ifdef DEBUG_MODE_FINE
     std::cout << "The solution vector is x = [" << std::endl;
     for(int i = 0; i < args->vec_size; ++i){
-        printf("%f, ", args->x_star[i]);
+        printf("%f, ", args->solver->x_star[i]);
     }
     std::cout << "]" << std::endl;
 #endif

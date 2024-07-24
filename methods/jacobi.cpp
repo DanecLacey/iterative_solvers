@@ -1,5 +1,5 @@
 #include "../kernels.hpp"
-#include "../structs.hpp"
+#include "../sparse_matrix.hpp"
 
 #ifdef USE_USPMV
 #include "../Ultimate-SpMV/code/interface.hpp"
@@ -151,4 +151,6 @@ void jacobi_iteration_sep_gpu(
     // account for diagonal element in sum, RHS, and division 
     jacobi_normalize_x_gpu<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_x_new, d_x_old, d_D, d_b, d_n_rows);
 }
+#else
+
 #endif

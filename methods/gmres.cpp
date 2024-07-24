@@ -2,12 +2,14 @@
 #include <cmath>
 
 #include "../kernels.hpp"
-#include "../structs.hpp"
 #include "../utility_funcs.hpp"
+#include "../sparse_matrix.hpp"
+#include "gmres.hpp"
 
 #ifdef USE_USPMV
 #include "../Ultimate-SpMV/code/interface.hpp"
 #endif
+
 
 void gmres_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
@@ -441,4 +443,219 @@ void gmres_iteration_ref_cpu(
 #endif
 
     timers->gmres_leastsq_wtime->end_stopwatch();
+}
+
+void allocate_gmres_structs(
+    gmresArgs *gmres_args,
+    int vec_size
+){
+    std::cout << "Allocating space for GMRES structs" << std::endl;
+    double *init_v = new double[vec_size];
+    double *V = new double[vec_size * gmres_args->restart_length + 1]; // (m x n)
+    double *Vy = new double[vec_size]; // (m x 1)
+    double *H = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m) 
+    double *H_tmp = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m)
+    double *J = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)];
+    double *R = new double[gmres_args->restart_length * (gmres_args->restart_length + 1)]; // (m+1 x m)
+    double *Q = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
+    double *Q_copy = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
+    double *g = new double[gmres_args->restart_length + 1];
+    double *g_copy = new double[gmres_args->restart_length + 1];
+
+    gmres_args->init_v = init_v;
+    gmres_args->V = V;
+    gmres_args->Vy = Vy;
+    gmres_args->H = H;
+    gmres_args->H_tmp = H_tmp;
+    gmres_args->J = J;
+    gmres_args->R = R;
+    gmres_args->Q = Q;
+    gmres_args->Q_copy = Q_copy;
+    gmres_args->g = g;
+    gmres_args->g_copy = g_copy;
+    gmres_args->restart_count = 0;
+}
+
+void init_gmres_structs(
+    gmresArgs *gmres_args,
+    double *r,
+    int n_rows
+){
+    int restart_len = gmres_args->restart_length;
+
+    gmres_args->beta = euclidean_vec_norm_cpu(r, n_rows);
+    scale(gmres_args->init_v, r, 1 / gmres_args->beta, n_rows);
+
+#ifdef DEBUG_MODE
+    std::cout << "Beta = " << args->solver->gmres_args->beta << std::endl;
+    std::cout << "init_v = [";
+        for(int i = 0; i < n_rows; ++i){
+            std::cout << this->gmres_args->init_v[i] << ", ";
+        }
+    std::cout << "]" << std::endl;
+#endif
+    
+    #pragma omp parallel
+    {
+        init(gmres_args->V, 0.0, n_rows * (restart_len+1));
+
+        // Give v0 to first row of V
+        #pragma omp for
+        for(int i = 0; i < n_rows; ++i){
+            gmres_args->V[i] = gmres_args->init_v[i];
+        }
+    }
+    
+    init(gmres_args->H, 0.0, restart_len * (restart_len+1));
+
+    #pragma omp parallel
+    {
+        init(gmres_args->Vy, 0.0, n_rows);
+    }
+    
+    init_identity(gmres_args->R, 0.0, restart_len, (restart_len+1));
+    
+    init_identity(gmres_args->Q, 0.0, (restart_len+1), (restart_len+1));
+
+    init_identity(gmres_args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
+
+    init(gmres_args->g, 0.0, restart_len+1);
+    gmres_args->g[0] = gmres_args->beta; // <- supply starting element
+    
+    init(gmres_args->g_copy, 0.0, restart_len+1);
+    gmres_args->g_copy[0] = gmres_args->beta; // <- supply starting element
+}
+
+void init_gmres_timers(Timers *timers){
+    timeval *gmres_spmv_start = new timeval;
+    timeval *gmres_spmv_end = new timeval;
+    Stopwatch *gmres_spmv_wtime = new Stopwatch(gmres_spmv_start, gmres_spmv_end);
+    timers->gmres_spmv_wtime = gmres_spmv_wtime;
+
+    timeval *gmres_orthog_start = new timeval;
+    timeval *gmres_orthog_end = new timeval;
+    Stopwatch *gmres_orthog_wtime = new Stopwatch(gmres_orthog_start, gmres_orthog_end);
+    timers->gmres_orthog_wtime = gmres_orthog_wtime;
+
+    timeval *gmres_mgs_start = new timeval;
+    timeval *gmres_mgs_end = new timeval;
+    Stopwatch *gmres_mgs_wtime = new Stopwatch(gmres_mgs_start, gmres_mgs_end);
+    timers->gmres_mgs_wtime = gmres_mgs_wtime;
+
+    timeval *gmres_mgs_dot_start = new timeval;
+    timeval *gmres_mgs_dot_end = new timeval;
+    Stopwatch *gmres_mgs_dot_wtime = new Stopwatch(gmres_mgs_dot_start, gmres_mgs_dot_end);
+    timers->gmres_mgs_dot_wtime = gmres_mgs_dot_wtime;
+
+    timeval *gmres_mgs_sub_start = new timeval;
+    timeval *gmres_mgs_sub_end = new timeval;
+    Stopwatch *gmres_mgs_sub_wtime = new Stopwatch(gmres_mgs_sub_start, gmres_mgs_sub_end);
+    timers->gmres_mgs_sub_wtime = gmres_mgs_sub_wtime;
+
+    timeval *gmres_leastsq_start = new timeval;
+    timeval *gmres_leastsq_end = new timeval;
+    Stopwatch *gmres_leastsq_wtime = new Stopwatch(gmres_leastsq_start, gmres_leastsq_end);
+    timers->gmres_leastsq_wtime = gmres_leastsq_wtime;
+
+    timeval *gmres_compute_H_tmp_start = new timeval;
+    timeval *gmres_compute_H_tmp_end = new timeval;
+    Stopwatch *gmres_compute_H_tmp_wtime = new Stopwatch(gmres_compute_H_tmp_start, gmres_compute_H_tmp_end);
+    timers->gmres_compute_H_tmp_wtime = gmres_compute_H_tmp_wtime;
+
+    timeval *gmres_compute_Q_start = new timeval;
+    timeval *gmres_compute_Q_end = new timeval;
+    Stopwatch *gmres_compute_Q_wtime = new Stopwatch(gmres_compute_Q_start, gmres_compute_Q_end);
+    timers->gmres_compute_Q_wtime = gmres_compute_Q_wtime;
+
+    timeval *gmres_compute_R_start = new timeval;
+    timeval *gmres_compute_R_end = new timeval;
+    Stopwatch *gmres_compute_R_wtime = new Stopwatch(gmres_compute_R_start, gmres_compute_R_end);
+    timers->gmres_compute_R_wtime = gmres_compute_R_wtime;
+
+    timeval *gmres_get_x_start = new timeval;
+    timeval *gmres_get_x_end = new timeval;
+    Stopwatch *gmres_get_x_wtime = new Stopwatch(gmres_get_x_start, gmres_get_x_end);
+    timers->gmres_get_x_wtime = gmres_get_x_wtime;
+}
+
+void gmres_get_x(
+    double *R,
+    double *g,
+    double *x,
+    double *x_0,
+    double *V,
+    double *Vy,
+    int n_rows,
+    int restart_count,
+    int iter_count,
+    int restart_len
+){
+    std::vector<double> y(restart_len, 0.0);
+
+    double diag_elem = 0.0;
+    double sum;
+
+    // Adjust for restarting
+    iter_count -= restart_count* restart_len;
+
+#ifdef DEBUG_MODE
+    std::cout << "gmres_get_x iter_count = " << iter_count << std::endl;
+    std::cout << "gmres_get_x restart_count = " << restart_count << std::endl;
+#endif
+
+#ifdef DEBUG_MODE
+    std::cout << "when solving for x, R" << " = [\n";
+    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
+        for(int col_idx = iter_count; col_idx >= 0; --col_idx){
+                std::cout << std::setw(11);
+                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
+            }
+            std::cout << "\n";
+        }
+    std::cout << "]" << std::endl;
+#endif
+
+    // (dense) Backward triangular solve Ry = g ((m+1 x m)(m x 1) = (m+1 x 1))
+    // Traverse R \in \mathbb{R}^(m+1 x m) from last to first row
+    for(int row_idx = iter_count; row_idx >= 0; --row_idx){
+        sum = 0.0;
+        for(int col_idx = row_idx; col_idx < restart_len; ++col_idx){
+            if(row_idx == col_idx){
+                diag_elem = R[(row_idx*restart_len) + col_idx];
+            }
+            else{
+                sum += R[(row_idx*restart_len) + col_idx] * y[col_idx];
+            }
+            
+        }
+        y[row_idx] = (g[row_idx] - sum) / diag_elem;
+#ifdef DEBUG_MODE_FINE
+        std::cout << g[row_idx] << " - " << sum << " / " << diag_elem << std::endl; 
+#endif
+    }
+
+#ifdef DEBUG_MODE
+    std::cout << "y_" << iter_count << " = [\n";
+    for(int i = 0; i < restart_len; ++i){
+        std::cout << y[i]  << ", ";
+    }
+    std::cout << "]" << std::endl;
+#endif
+
+    // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
+    dense_MMM_t(V, &y[0], Vy, n_rows, restart_len, 1);
+
+#ifdef DEBUG_MODE
+    std::cout << "Vy_" << iter_count << " = [\n";
+    for(int i = 0; i < n_rows; ++i){
+        std::cout << Vy[i]  << ", ";
+    }
+    std::cout << "]" << std::endl;
+#endif
+
+    // Finally, solve for x ((n x 1) = (n x 1) + (n x m)(m x 1))
+    for(int i = 0; i < n_rows; ++i){
+        x[i] = x_0[i] + Vy[i];
+        // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
+    }
 }

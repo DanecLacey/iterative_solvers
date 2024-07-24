@@ -41,11 +41,25 @@ void compare_with_direct(
     double iterative_final_residual
 );
 
-void split_upper_lower_diagonal(
+void allocate_gmres_structs(
+    gmresArgs *gmres_args,
+    int vec_size
+);
+
+void init_gmres_structs(
+    gmresArgs *gmres_args,
+    int n_rows
+);
+
+void init_gmres_structs(
+    gmresArgs *gmres_args,
+    int n_rows
+);
+
+void split_L_U(
     COOMtxData *full_coo_mtx,
-    COOMtxData *U_coo_mtx,
     COOMtxData *L_coo_mtx,
-    std::vector<double> *D_coo_vec
+    COOMtxData *U_coo_mtx
 );
 
 void convert_to_crs(
@@ -75,7 +89,7 @@ void init_gmres_structs(
     int n_rows
 );
 
-void init_gmres_timers(argType *args);
+void init_gmres_timers(Timers *timers);
 
 void record_residual_norm(
     argType *args,

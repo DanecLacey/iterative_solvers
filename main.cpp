@@ -64,7 +64,7 @@ int main(int argc, char *argv[]){
     std::string matrix_file_name;
     assign_cli_inputs(args, argc, argv, &matrix_file_name);
 
-    Solver *solver = new Solver;
+    Solver *solver = new Solver(args->solver_type);
     Preconditioner *preconditioner = new Preconditioner;
     gmresArgs *gmres_args = new gmresArgs;
     args->solver = solver;
@@ -100,12 +100,12 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        50000, // maximum iteration count
+        500, // maximum iteration count
         0.0, // init stopping criteria
         1e-12, // tolerance to stop iterations
         1.0, // init value for b
         0.0, // init value for x
-        110 // GMRES restart length
+        25 // GMRES restart length
     };
 ////////////////////////////////////////////////
 
@@ -113,7 +113,7 @@ int main(int argc, char *argv[]){
     args->flags = &flags;
     args->matrix_file_name = &matrix_file_name;
     args->sparse_mat = sparse_mat;
-    args->solver->gmres_args->gmres_restart_len = loop_params.gmres_restart_len;
+    args->solver->gmres_args->restart_length = loop_params.gmres_restart_len;
     args->coo_mat = coo_mat;
 
 #ifdef __CUDACC__

@@ -2,7 +2,7 @@
 COMPILER=icx
 # Only applicable for gpu builds
 # Options: a40, a100
-GPGPU_ARCH=
+GPGPU_ARCH=a100
 THREADS_PER_BLOCK=32
 BLOCKS_PER_GRID=256
 
@@ -41,9 +41,6 @@ ifeq ($(COMPILER),icc)
   OPT_LEVEL = -O3
   OPT_ARCH  = -xhost
   CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
-ifeq ($(DEBUG_MODE),1)
-  DEBUGFLAGS += -g -DDEBUG_MODE
-endif
 endif
 
 ifeq ($(COMPILER),icx)
@@ -78,6 +75,7 @@ endif
 ifeq ($(DEBUG_MODE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE
 endif
+
 
 ifeq ($(DEBUG_MODE_FINE),1)
   DEBUGFLAGS += -g -DDEBUG_MODE -DDEBUG_MODE_FINE
@@ -146,7 +144,7 @@ endif
 
 iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o
 ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
+	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o methods/jacobi.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
 endif

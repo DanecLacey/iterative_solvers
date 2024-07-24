@@ -1,6 +1,6 @@
 #ifndef KERNELS_H
 #define KERNELS_H
-#include "structs.hpp"
+#include "sparse_matrix.hpp"
 #include <cstdlib>
 
 

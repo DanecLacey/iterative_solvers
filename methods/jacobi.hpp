@@ -1,4 +1,7 @@
-#include "../structs.hpp"
+#ifndef JACOBI_H
+#define JACOBI_H
+
+#include "../sparse_matrix.hpp"
 
 void jacobi_iteration_ref_cpu(
     SparseMtxFormat *sparse_mat,
@@ -39,4 +42,6 @@ void jacobi_iteration_sep_gpu(
     double *d_x_old,
     double *d_x_new
 );
+#endif
+
 #endif

@@ -1,5 +1,6 @@
 #include "../kernels.hpp"
-#include "../structs.hpp"
+#include "../sparse_matrix.hpp"
+#include "../utility_funcs.hpp"
 
 #ifdef USE_USPMV
 #include "../Ultimate-SpMV/code/interface.hpp"
@@ -26,6 +27,9 @@ void gs_iteration_ref_cpu(
             }
         }
         x[row_idx] = (b[row_idx] - sum) / diag_elem;
+#ifdef DEBUG_MODE_FINE
+        std::cout << "x[" << row_idx << "] = " << b[row_idx] << " - " << sum << " / " <<  diag_elem <<std::endl;
+#endif
     }
 }
 
@@ -89,4 +93,45 @@ void gs_iteration_sep_cpu(
 #endif
     
     }
+}
+
+void init_gs_structs(
+    COOMtxData *coo_mat,
+    SparseMtxFormat *sparse_mat
+){
+    COOMtxData *coo_L = new COOMtxData;
+    COOMtxData *coo_U = new COOMtxData;
+
+    split_L_U(coo_mat, coo_L, coo_U);
+
+#ifdef USE_USPMV
+    // Only used for GS kernel
+    // TODO: Find a better solution than this crap
+    MtxData<double, int> *mtx_L = new MtxData<double, int>;
+    mtx_L->n_rows = coo_L->n_rows;
+    mtx_L->n_cols = coo_L->n_cols;
+    mtx_L->nnz = coo_L->nnz;
+    mtx_L->is_sorted = true; //TODO
+    mtx_L->is_symmetric = false; //TODO
+    mtx_L->I = coo_L->I;
+    mtx_L->J = coo_L->J;
+    mtx_L->values = coo_L->values;
+    convert_to_scs<double, int>(mtx_L, CHUNK_SIZE, SIGMA, sparse_mat->scs_L);
+
+    MtxData<double, int> *mtx_U = new MtxData<double, int>;
+    mtx_U->n_rows = coo_U->n_rows;
+    mtx_U->n_cols = coo_U->n_cols;
+    mtx_U->nnz = coo_U->nnz;
+    mtx_U->is_sorted = true; //TODO
+    mtx_U->is_symmetric = false; //TODO
+    mtx_U->I = coo_U->I;
+    mtx_U->J = coo_U->J;
+    mtx_U->values = coo_U->values;
+    convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, sparse_mat->scs_U);
+#endif
+    convert_to_crs(coo_L, sparse_mat->crs_L);
+    convert_to_crs(coo_U, sparse_mat->crs_U);
+
+    delete coo_L;
+    delete coo_U;
 }
