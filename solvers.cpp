@@ -10,13 +10,9 @@ void solve_cpu(
 ){
     std::cout << "Entering Solver Harness" << std::endl;
 
-    // Do we need fresh x anymore?
     double *x = new double[args->vec_size];
     double *x_new = new double[args->vec_size];
     double *x_old = new double[args->vec_size];
-    // SparseMtxFormat *sparse_mat = args->sparse_mat;
-    // Flags *flags = args->flags;
-    // Solver *solver = args->solver;
     double residual_norm;
 
     args->solver->copy_fresh_x(x, x_new, x_old, args->vec_size);
@@ -25,8 +21,6 @@ void solve_cpu(
         iter_output(args->solver->x_old, args->vec_size, args->loop_params->iter_count);
         printf("\n");
     }
-
-    // init_gmres_structs(args->solver->gmres_args, args->vec_size);
 
 #ifdef DEBUG_MODE
     std::cout << "x vector:" << std::endl;

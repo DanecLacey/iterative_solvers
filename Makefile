@@ -1,32 +1,7 @@
-# Options: gcc, icc, icx, nvcc
-COMPILER=icx
-# Only applicable for gpu builds
-# Options: a40, a100
-GPGPU_ARCH=a100
-THREADS_PER_BLOCK=32
-BLOCKS_PER_GRID=256
+include config.mk
 
-DEBUG_MODE = 0
-DEBUG_MODE_FINE = 0
-OUTPUT_SPARSITY = 0
-FINE_TIMERS = 0
-
-USE_LIKWID = 0
-USE_EIGEN = 0
-USE_GPROF = 0
-USE_SCAMAC = 0
-
-USE_USPMV = 0
-USE_AP = 0
-AP_THRESHOLD = 0 # iter
-CHUNK_SIZE = 1
-SIGMA = 1
-VECTOR_LENGTH = 8
-
-# TODO
-# USE_METIS = 1
-# USE_SPMP = 0
-
+# apply solver parameters
+CXXFLAGS += -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN)
 
 # compiler options
 ifeq ($(COMPILER),gcc)
@@ -101,9 +76,6 @@ ifeq ($(USE_USPMV),1)
 endif
 
 ifeq ($(USE_LIKWID),1)
-  # !!! include your own file paths !!! (I'm just loading module, which comes with file paths)
-  # LIKWID_INC =
-  # LIKWID_LIB = 
   ifeq ($(LIKWID_INC),)
     $(error USE_LIKWID selected, but no include path given in LIKWID_INC)
   endif
@@ -114,9 +86,6 @@ ifeq ($(USE_LIKWID),1)
 endif
 
 ifeq ($(USE_SCAMAC),1)
-  # !!! include your own file paths !!!
-  SCAMAC_INC = -I/home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/scamac/include/
-  SCAMAC_LIB = /home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/library/libscamac.a
   ifeq ($(SCAMAC_INC),)
     $(error SCAMAC_INC selected, but no include path given in SCAMAC_INC)
   endif
@@ -130,8 +99,6 @@ endif
 
 # Header-only library
 ifeq ($(USE_EIGEN),1)
-  # !!! include your own file paths !!!
-  # EIGEN_INC =
   ifeq ($(EIGEN_ROOT),)
     $(error USE_EIGEN selected, but no include path given in EIGEN_ROOT)
   endif
@@ -271,4 +238,5 @@ else
 
 clean:
 	-rm *.o
+	-rm methods/*.o
 	-rm test_suite/*.o

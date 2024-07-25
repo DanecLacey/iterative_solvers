@@ -100,12 +100,12 @@ int main(int argc, char *argv[]){
         0, // init iteration count
         0, // init residuals count
         1, // calculate residual every n iterations
-        500, // maximum iteration count
+        MAX_ITERS, // maximum iteration count
         0.0, // init stopping criteria
-        1e-12, // tolerance to stop iterations
+        TOL, // tolerance to stop iterations
         1.0, // init value for b
         0.0, // init value for x
-        25 // GMRES restart length
+        GMRES_RESTART_LEN // GMRES restart length
     };
 ////////////////////////////////////////////////
 

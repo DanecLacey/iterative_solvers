@@ -7,7 +7,7 @@
 #include "gmres.hpp"
 
 #ifdef USE_USPMV
-#include "../Ultimate-SpMV/code/interface.hpp"
+#include "../../Ultimate-SpMV/code/interface.hpp"
 #endif
 
 
@@ -487,10 +487,10 @@ void init_gmres_structs(
     scale(gmres_args->init_v, r, 1 / gmres_args->beta, n_rows);
 
 #ifdef DEBUG_MODE
-    std::cout << "Beta = " << args->solver->gmres_args->beta << std::endl;
+    std::cout << "Beta = " << gmres_args->beta << std::endl;
     std::cout << "init_v = [";
         for(int i = 0; i < n_rows; ++i){
-            std::cout << this->gmres_args->init_v[i] << ", ";
+            std::cout << gmres_args->init_v[i] << ", ";
         }
     std::cout << "]" << std::endl;
 #endif

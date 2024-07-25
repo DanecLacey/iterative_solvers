@@ -126,6 +126,7 @@ void init_gs_structs(
     mtx_U->values = coo_U->values;
     convert_to_scs<double, int>(mtx_U, CHUNK_SIZE, SIGMA, sparse_mat->scs_U);
 #endif
+
     convert_to_crs(coo_L, sparse_mat->crs_L);
     convert_to_crs(coo_U, sparse_mat->crs_U);
 
