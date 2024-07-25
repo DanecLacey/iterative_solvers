@@ -2,7 +2,7 @@
 #include "../sparse_matrix.hpp"
 
 #ifdef USE_USPMV
-#include "../Ultimate-SpMV/code/interface.hpp"
+#include "../../Ultimate-SpMV/code/interface.hpp"
 #endif
 
 void jacobi_iteration_ref_cpu(
@@ -46,12 +46,8 @@ void jacobi_iteration_sep_cpu(
     double *b,
     double *x_old,
     double *x_new,
-    int N
+    int n_rows
 ){
-    int n_rows = N; // <- make more flexible
-
-    #pragma omp parallel
-    {
 #ifdef USE_USPMV
         // uspmv_omp_scs_cpu<double, int>(
         uspmv_omp_scs_cpu(
@@ -63,16 +59,11 @@ void jacobi_iteration_sep_cpu(
             &(sparse_mat->scs_mat->values)[0],
             x_old,
             x_new);
-
-        n_rows = sparse_mat->scs_mat->n_rows;
-        // TODO: not sure which is correct
-        // n_rows = sparse_mat->scs_mat->n_rows_padded;
 #else
         spmv_crs_cpu(x_new, sparse_mat->crs_mat, x_old);
 #endif
         // account for diagonal element in sum, RHS, and division 
-        jacobi_normalize_x_cpu(x_new, x_old, D, b, N);
-    }
+        jacobi_normalize_x_cpu(x_new, x_old, D, b, n_rows);
 }
 
 #ifdef __CUDACC__

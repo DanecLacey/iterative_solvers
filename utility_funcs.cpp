@@ -854,7 +854,6 @@ void preprocessing(
     args->solver->allocate_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
 #ifdef USE_USPMV
-
 #ifdef USE_AP
     MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
     MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
@@ -866,11 +865,9 @@ void preprocessing(
     convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
     convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
 #endif
-
-#else
-    // Only need to convert to CRS if SCS struct doesn't already exist
-    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
 #endif
+
+    convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
     
 #ifdef __CUDACC__
     gpu_allocate_copy_sparse_mat(args);
@@ -890,7 +887,7 @@ void preprocessing(
 #ifdef USE_USPMV
     // Need to permute these vectors in accordance with SIGMA if using USpMV library
     double *D_perm = new double [args->vec_size];
-    apply_permutation(D_perm, args->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
+    apply_permutation(D_perm, args->solver->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
     // std::swap(D_perm, args->D);
 
     double *b_perm = new double [args->vec_size];

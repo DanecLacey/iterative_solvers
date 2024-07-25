@@ -119,7 +119,7 @@ public:
         if(solver_type == "jacobi"){
             
         }
-        else if(solver_type == "gauss_seidel"){
+        else if(solver_type == "gauss-seidel"){
             
         }
         else if(solver_type == "gmres"){
@@ -136,7 +136,7 @@ public:
         if(solver_type == "jacobi"){
 
         }
-        else if(solver_type == "gauss_seidel"){
+        else if(solver_type == "gauss-seidel"){
             init_gs_structs(coo_mat, sparse_mat);
         }
         else if(solver_type == "gmres"){
@@ -167,25 +167,28 @@ public:
         SparseMtxFormat *sparse_mat,
         Timers *timers,
         int vec_size,
+        int n_rows,
         int iter_count,
         double *residual_norm
     ){
         if(solver_type == "jacobi"){
-            jacobi_iteration_ref_cpu(
+            jacobi_iteration_sep_cpu(
                 sparse_mat,
                 this->D,
                 this->b,
                 this->x_old,
-                this->x_new
+                this->x_new,
+                n_rows
             );
         }
         else if(solver_type == "gauss-seidel"){
-            gs_iteration_ref_cpu(
+            gs_iteration_sep_cpu(
                 sparse_mat, 
                 this->tmp, 
                 this->D, 
                 this->b, 
-                this->x
+                this->x,
+                n_rows
             );
         }
         else if(solver_type == "gmres"){
@@ -218,6 +221,7 @@ public:
         Timers *timers,
         SparseMtxFormat *sparse_mat,
         int vec_size,
+        int n_cols,
         int iter_count
     ){
 #ifdef DEBUG_MODE
@@ -242,7 +246,7 @@ public:
 
     #ifdef DEBUG_MODE
         printf("restart residual = [");
-        for(int i = 0; i < args->coo_mat->n_cols; ++i){
+        for(int i = 0; i < n_cols; ++i){
             std::cout << this->r[i] << ",";
         }
         printf("]\n");
@@ -252,10 +256,11 @@ public:
         scale(this->gmres_args->init_v, this->r, 1 / this->gmres_args->beta, vec_size);
 
     #ifdef DEBUG_MODE
-        std::cout << "Restarted Beta = " << args->solver->gmres_args->beta << std::endl;          
+        std::cout << "Restarted Beta = " << this->gmres_args->beta << std::endl;          
 
+        // TODO: Is this vec_size, or n_cols?
         std::cout << "init_v = [";
-            for(int i = 0; i < args->vec_size; ++i){
+            for(int i = 0; i < vec_size; ++i){
                 std::cout << this->gmres_args->init_v[i] << ", ";
             }
         std::cout << "]" << std::endl;
@@ -271,8 +276,8 @@ public:
 
     #ifdef DEBUG_MODE
         std::cout << "Restarted GMRES outputting the x vector [" << std::endl;
-        for(int i = 0; i < args->vec_size; ++i){
-            std::cout << args->solver->x[i] << std::endl;
+        for(int i = 0; i < vec_size; ++i){
+            std::cout << this->x[i] << std::endl;
         }
         std::cout << "]" << std::endl;
     #endif
@@ -342,7 +347,7 @@ public:
     void unpermute_x_star(
         int vec_size,
         int n_cols,
-        int *old_to_new_idx,
+        int *old_to_new_idx
     ){
     // Bring final result vector out of permuted space
     double *x_star_perm = new double[vec_size];
@@ -358,6 +363,7 @@ public:
     delete x_star_perm;
     }
 #endif
+
 };
 
 class Preconditioner

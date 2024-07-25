@@ -41,21 +41,6 @@ void compare_with_direct(
     double iterative_final_residual
 );
 
-void allocate_gmres_structs(
-    gmresArgs *gmres_args,
-    int vec_size
-);
-
-void init_gmres_structs(
-    gmresArgs *gmres_args,
-    int n_rows
-);
-
-void init_gmres_structs(
-    gmresArgs *gmres_args,
-    int n_rows
-);
-
 void split_L_U(
     COOMtxData *full_coo_mtx,
     COOMtxData *L_coo_mtx,
@@ -83,13 +68,6 @@ void gmres_get_x(
 void preprocessing(
     argType *args
 );
-
-void init_gmres_structs(
-    gmresArgs *gmres_args,
-    int n_rows
-);
-
-void init_gmres_timers(Timers *timers);
 
 void record_residual_norm(
     argType *args,
@@ -154,12 +132,6 @@ void scamac_make_mtx(
 #endif
 
 void allocate_structs(
-    argType *args
-);
-
-void init_gs_structs(argType *args);
-
-void gmres_allocate_structs(
     argType *args
 );
 

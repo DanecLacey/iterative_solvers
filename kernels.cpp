@@ -416,8 +416,7 @@ void jacobi_normalize_x_cpu(
 ){
     double adjusted_x;
 
-    // Orphaned directive: Assumed already called within a parallel region
-    #pragma omp for schedule (static)
+    #pragma omp parallel for schedule (static)
     for(int row_idx = 0; row_idx < n_rows; ++row_idx){
         adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
         x_new[row_idx] = (b[row_idx] - adjusted_x)/ D[row_idx];
@@ -461,7 +460,6 @@ void spltsv_crs(
 )
 {
     double sum;
-
     for(int row_idx = 0; row_idx < crs_L->n_rows; ++row_idx){
         sum = 0.0;
         for(int nz_idx = crs_L->row_ptr[row_idx]; nz_idx < crs_L->row_ptr[row_idx+1]; ++nz_idx){
@@ -471,6 +469,9 @@ void spltsv_crs(
 #endif
         }
         x[row_idx] = (b_Ux[row_idx] - sum)/D[row_idx];
+#ifdef DEBUG_MODE_FINE
+        std::cout << b_Ux[row_idx] << " - " << sum << " / " << D[row_idx] << " = " << x[row_idx] << " at idx: " << row_idx << std::endl; 
+#endif
     }
 }
 

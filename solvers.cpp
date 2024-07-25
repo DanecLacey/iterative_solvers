@@ -47,6 +47,7 @@ void solve_cpu(
             args->sparse_mat,
             args->timers,
             args->vec_size,
+            args->coo_mat->n_rows,
             args->loop_params->iter_count,
             &residual_norm
         );
@@ -83,6 +84,7 @@ void solve_cpu(
                 args->timers,
                 args->sparse_mat,
                 args->vec_size,
+                args->coo_mat->n_cols,
                 args->loop_params->iter_count
             );
 
