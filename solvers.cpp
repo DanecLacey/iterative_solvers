@@ -10,12 +10,7 @@ void solve_cpu(
 ){
     std::cout << "Entering Solver Harness" << std::endl;
 
-    double *x = new double[args->vec_size];
-    double *x_new = new double[args->vec_size];
-    double *x_old = new double[args->vec_size];
     double residual_norm;
-
-    args->solver->copy_fresh_x(x, x_new, x_old, args->vec_size);
 
     if(args->flags->print_iters){
         iter_output(args->solver->x_old, args->vec_size, args->loop_params->iter_count);
@@ -25,7 +20,7 @@ void solve_cpu(
 #ifdef DEBUG_MODE
     std::cout << "x vector:" << std::endl;
     for(int i = 0; i < args->vec_size; ++i){
-        std::cout << x[i] << std::endl;
+        std::cout << args->solver->x[i] << std::endl;
     }
 #endif
 
@@ -59,7 +54,8 @@ void solve_cpu(
                 args->solver->x, 
                 args->solver->b, 
                 args->solver->x_new, 
-                args->solver->tmp
+                args->solver->tmp,
+                args->solver->tmp_perm
             );
         }
 
@@ -100,16 +96,9 @@ void solve_cpu(
         args->solver->x_star, 
         args->solver->b, 
         args->solver->x_star, 
-        args->solver->tmp
+        args->solver->tmp,
+        args->solver->tmp_perm
     );
-
-#ifdef USE_USPMV
-    args->solver->unpermute_x_star(args->vec_size, args->coo_mat->n_cols, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
-#endif
-
-    delete x;
-    delete x_new;
-    delete x_old;
 }
 
 #ifdef __CUDACC__

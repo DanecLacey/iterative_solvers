@@ -14,6 +14,7 @@ void gs_iteration_ref_cpu(
 void gs_iteration_sep_cpu(
     SparseMtxFormat *sparse_mat,
     double *tmp,
+    double *tmp_perm,
     double *D,
     double *b,
     double *x,

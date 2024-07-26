@@ -195,6 +195,7 @@ void calc_residual_cpu(
     double *b,
     double *r,
     double *tmp,
+    double *tmp_perm,
     int N
 );
 

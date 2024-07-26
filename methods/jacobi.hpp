@@ -16,8 +16,10 @@ void jacobi_iteration_sep_cpu(
     double *D,
     double *b,
     double *x_old,
+    double *x_old_perm,
     double *x_new,
-    int N
+    double *x_new_perm,
+    int n_rows
 );
 
 #ifdef __CUDACC__

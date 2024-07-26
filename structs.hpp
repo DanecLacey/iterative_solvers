@@ -40,6 +40,34 @@ struct LoopParams
     double init_b;
     double init_x;
     int gmres_restart_len;
+
+    double compute_stopping_criteria(
+        std::string solver_type,
+        double *r,
+        int n_cols
+    ){
+        // Precalculate stopping criteria
+        // NOTE: Easier to always do on the host for now
+        double norm_r0;
+        double stopping_critera;
+
+        if(solver_type == "gmres"){
+            norm_r0 = euclidean_vec_norm_cpu(r, n_cols);
+        }
+        else{
+            norm_r0 = infty_vec_norm_cpu(r, n_cols);
+        }
+
+        stopping_critera = this->tol * norm_r0;
+
+#ifdef DEBUG_MODE
+        printf("norm(initial residual) = %f\n", norm_r0);
+        printf("stopping criteria = %f\n", stopping_criteria);
+        std::cout << "stopping criteria = " << this->tol <<  " * " <<  norm_r0 << " = " << stopping_criteria << std::endl;
+#endif
+
+        return stopping_critera; 
+    }
 };
 
 class Solver
@@ -68,7 +96,11 @@ public:
     double *x_new;
     double *x_old;
     double *x;
+    double *x_perm;
+    double *x_old_perm;
+    double *x_new_perm;
     double *tmp;
+    double *tmp_perm;
     double *D;
     double *r;
     double *b;
@@ -110,7 +142,7 @@ public:
         this->x_old = fresh_x_old;       
     }
 
-    void allocate_structs(
+    void allocate_solver_structs(
         SparseMtxFormat *sparse_mat,
         COOMtxData *coo_mat,
         Timers *timers,
@@ -151,7 +183,8 @@ public:
         {
 #ifdef USE_USPMV
 #ifdef USE_AP
-            LIKWID_MARKER_REGISTER("uspmv_ap_crs_benchmark");
+            // LIKWID_MARKER_REGISTER("uspmv_ap_crs_benchmark");
+            LIKWID_MARKER_REGISTER("uspmv_ap_scs_benchmark");
 #else
             LIKWID_MARKER_REGISTER("uspmv_crs_benchmark");
 #endif
@@ -177,7 +210,9 @@ public:
                 this->D,
                 this->b,
                 this->x_old,
+                this->x_old_perm,
                 this->x_new,
+                this->x_new_perm,
                 n_rows
             );
         }
@@ -185,6 +220,7 @@ public:
             gs_iteration_sep_cpu(
                 sparse_mat, 
                 this->tmp, 
+                this->tmp_perm, 
                 this->D, 
                 this->b, 
                 this->x,
@@ -202,13 +238,14 @@ public:
                 this->gmres_args->Q,
                 this->gmres_args->Q_copy,
                 this->tmp, 
+                this->tmp_perm, 
                 this->gmres_args->R,
                 this->gmres_args->g,
                 this->gmres_args->g_copy,
                 this->b, 
                 this->x,
                 this->gmres_args->beta,
-                vec_size,
+                n_rows,
                 this->gmres_args->restart_count,
                 iter_count,
                 residual_norm,
@@ -235,14 +272,14 @@ public:
             this->x_old, 
             this->gmres_args->V, 
             this->gmres_args->Vy, 
-            vec_size, 
+            n_cols, 
             this->gmres_args->restart_count, 
             iter_count, 
             this->gmres_args->restart_length
         );
         timers->gmres_get_x_wtime->end_stopwatch();
 
-        calc_residual_cpu(sparse_mat, this->x, this->b, this->r, this->tmp, vec_size);
+        calc_residual_cpu(sparse_mat, this->x, this->b, this->r, this->tmp, this->tmp_perm, n_cols);
 
     #ifdef DEBUG_MODE
         printf("restart residual = [");
@@ -345,13 +382,12 @@ public:
 
 #ifdef USE_USPMV
     void unpermute_x_star(
-        int vec_size,
         int n_cols,
         int *old_to_new_idx
     ){
     // Bring final result vector out of permuted space
-    double *x_star_perm = new double[vec_size];
-    apply_permutation(x_star_perm, this->x_star, old_to_new_idx, vec_size);
+    double *x_star_perm = new double[n_cols];
+    apply_permutation(x_star_perm, this->x_star, old_to_new_idx, n_cols);
 
     // Deep copy, so you can free memory
     // NOTE: You do not take SCS padding with you! 
@@ -362,6 +398,38 @@ public:
 
     delete x_star_perm;
     }
+
+    void permute_arrays(
+        int vec_size,
+        int *old_to_new_idx,
+        int *new_to_old_idx
+    ){
+        // Permute these vectors in accordance with SIGMA if using USpMV library
+        double *D_perm = new double [vec_size];
+        apply_permutation(D_perm, this->D, old_to_new_idx, vec_size);
+        // std::swap(D_perm, args->D);
+
+        double *b_perm = new double [vec_size];
+        apply_permutation(b_perm, this->b, old_to_new_idx, vec_size);
+        // std::swap(b_perm, args->b);
+
+        // NOTE: Permuted w.r.t. columns due to symmetric permutation
+        // double *x_old_perm = new double[vec_size];
+        // apply_permutation(x_old_perm, this->x_old, new_to_old_idx, vec_size);
+        // std::swap(x_old_perm, args->x_old);
+
+        // Deep copy, so you can free memory
+        // TODO: wrap in func
+        for(int i = 0; i < vec_size; ++i){
+            this->D[i] = D_perm[i]; // ?? Double Check!
+            this->b[i] = b_perm[i]; // ?? Double Check!
+            // this->x_old[i] = x_old_perm[i];
+        }
+
+        delete D_perm;
+        delete b_perm;
+        // delete x_old_perm;
+    }  
 #endif
 
 };

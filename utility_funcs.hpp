@@ -78,7 +78,8 @@ void record_residual_norm(
     double *x,
     double *b,
     double *x_new,
-    double *tmp
+    double *tmp,
+    double *tmp_perm
 );
 
 void iter_output(
@@ -114,7 +115,7 @@ void scale_matrix(
 void init(
     double *vec,
     double val,
-    int size
+    long size
 );
 
 void init_identity(

@@ -28,11 +28,10 @@
 void init(
     double *vec,
     double val,
-    int size
+    long size
 ){
     // TODO: validate first touch policy?
-    // Orphaned Directive
-    #pragma omp for
+    #pragma omp parallel for
     for(int i = 0; i < size; ++i){
         vec[i] = val;
     }
@@ -45,8 +44,7 @@ void init_identity(
     int n_cols
 ){
     // TODO: validate first touch policy?
-    // Orphaned Directive
-    #pragma omp for
+    #pragma omp parallel for
     for(int i = 0; i < n_rows; ++i){
         for(int j = 0; j < n_cols; ++j){
             if(i == j){
@@ -344,15 +342,16 @@ void record_residual_norm(
     double *x,
     double *b,
     double *x_new,
-    double *tmp
+    double *tmp,
+    double *tmp_perm
 ){
     if(args->solver_type == "jacobi"){
-        calc_residual_cpu(sparse_mat, x_new, b, r, tmp, args->vec_size);
-        *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
+        calc_residual_cpu(sparse_mat, x_new, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
+        *residual_norm = infty_vec_norm_cpu(r, args->coo_mat->n_cols);
     }
     else if(args->solver_type == "gauss-seidel"){
-        calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
-        *residual_norm = infty_vec_norm_cpu(r, args->vec_size);
+        calc_residual_cpu(sparse_mat, x, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
+        *residual_norm = infty_vec_norm_cpu(r, args->coo_mat->n_cols);
     }
     else if(args->solver_type == "gmres"){
         // NOTE: While not needed for GMRES in theory, it is helpful to compare
@@ -686,18 +685,32 @@ void allocate_structs(
 ){
     std::cout << "Allocating space for general structs" << std::endl;
     double *x_star = new double[args->vec_size];
+    double *x = new double[args->vec_size];
     double *x_old = new double[args->vec_size];
     double *x_new = new double[args->vec_size];
+#ifdef USE_USPMV
+    double *x_perm = new double[args->vec_size];
+    double *x_old_perm = new double[args->vec_size];
+    double *x_new_perm = new double[args->vec_size];
+#endif
     double *tmp = new double[args->vec_size];
+    double *tmp_perm = new double[args->vec_size];
     double *D = new double[args->vec_size];
     double *r = new double[args->vec_size];
     double *b = new double[args->vec_size];
     double *normed_residuals = new double[args->loop_params->max_iters / args->loop_params->residual_check_len + 1];
 
+    args->solver->x = x;
     args->solver->x_star = x_star;
     args->solver->x_old = x_old;
     args->solver->x_new = x_new;
+#ifdef USE_USPMV
+    args->solver->x_perm = x_perm;
+    args->solver->x_old_perm = x_old_perm;
+    args->solver->x_new_perm = x_new_perm;
+#endif
     args->solver->tmp = tmp;
+    args->solver->tmp_perm = tmp_perm;
     args->solver->D = D;
     args->solver->r = r;
     args->solver->b = b;
@@ -824,6 +837,7 @@ void preprocessing(
     scale_matrix_cols(args->coo_mat, &largest_col_elems);
 
 #ifdef USE_USPMV
+    // Convert COO mat to Sell-C-Simga
     MtxData<double, int> *mtx_mat = new MtxData<double, int>;
     mtx_mat->n_rows = args->coo_mat->n_rows;
     mtx_mat->n_cols = args->coo_mat->n_cols;
@@ -836,7 +850,9 @@ void preprocessing(
 
     // NOTE: Symmetric permutation, i.e. rows and columns
     convert_to_scs<double, int>(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
-    permute_scs_cols<double, int>(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
+
+    // TODO: Do you need to do this at all, with your current permutation stategy?
+    // permute_scs_cols<double, int>(args->sparse_mat->scs_mat, &(args->sparse_mat->scs_mat->old_to_new_idx)[0]);
 
     // NOTE: We change vec_size here, so all structs from here on will be different size!
     args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
@@ -851,10 +867,12 @@ void preprocessing(
     gpu_allocate_structs(args);
 #endif
 
-    args->solver->allocate_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
+    // Allocate structs specific to each solver
+    args->solver->allocate_solver_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
 #ifdef USE_USPMV
 #ifdef USE_AP
+    // Convert MTX mat to Sell-C-Simga in the case of AP
     MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
     MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
     // MtxData<double, int> *mtx_mat_lp = new MtxData<double, int>;
@@ -862,12 +880,19 @@ void preprocessing(
     args->lp_percent = mtx_mat_lp->nnz / (double)mtx_mat->nnz;
     args->hp_percent = mtx_mat_hp->nnz / (double)mtx_mat->nnz;
 
+    std::cout << "Converting HP struct" << std::endl;
     convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
-    convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp); 
+    std::cout << "Converting LP struct" << std::endl;
+    convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp, &(args->sparse_mat->scs_mat_hp->old_to_new_idx)[0]); 
 #endif
 #endif
 
+    // Just convenient to have a CRS copy too
     convert_to_crs(args->coo_mat, args->sparse_mat->crs_mat);
+
+#ifdef USE_USPMV
+
+#endif
     
 #ifdef __CUDACC__
     gpu_allocate_copy_sparse_mat(args);
@@ -885,40 +910,13 @@ void preprocessing(
     scale_vector(args->solver->x_old, &largest_row_elems, args->vec_size);
 
 #ifdef USE_USPMV
-    // Need to permute these vectors in accordance with SIGMA if using USpMV library
-    double *D_perm = new double [args->vec_size];
-    apply_permutation(D_perm, args->solver->D, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    // std::swap(D_perm, args->D);
-
-    double *b_perm = new double [args->vec_size];
-    apply_permutation(b_perm, args->solver->b, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], args->vec_size);
-    // std::swap(b_perm, args->b);
-
-    // NOTE: Permuted w.r.t. columns due to symmetric permutation
-    double *x_old_perm = new double[args->vec_size];
-    apply_permutation(x_old_perm, args->solver->x_old, &(args->sparse_mat->scs_mat->new_to_old_idx)[0], args->vec_size);
-    // std::swap(x_old_perm, args->x_old);
-
-    // Deep copy, so you can free memory
-    // TODO: wrap in func
-    for(int i = 0; i < args->vec_size; ++i){
-        args->solver->D[i] = D_perm[i]; // ?? Double Check!
-        args->solver->b[i] = b_perm[i]; // ?? Double Check!
-        args->solver->x_old[i] = x_old_perm[i];
-    }
-
-    delete D_perm;
-    delete b_perm;
-    delete x_old_perm;
+    // args->solver->permute_arrays(args->vec_size, &(args->sparse_mat->scs_mat->old_to_new_idx)[0], &(args->sparse_mat->scs_mat->new_to_old_idx)[0]);
 #endif
 
 #ifdef __CUDACC__
     gpu_copy_structs(args);
 #endif
-    calc_residual_cpu(args->sparse_mat, args->solver->x_old, args->solver->b, args->solver->r, args->solver->tmp, args->coo_mat->n_cols);
-
-    args->solver->init_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
-
+    calc_residual_cpu(args->sparse_mat, args->solver->x_old, args->solver->b, args->solver->r, args->solver->tmp, args->solver->tmp_perm, args->coo_mat->n_cols);
 
 #ifdef DEBUG_MODE
     printf("initial residual = [");
@@ -928,24 +926,9 @@ void preprocessing(
     printf("]\n");
 #endif
 
-    // Precalculate stopping criteria
-    // NOTE: Easier to just do on the host for now for GPU
-    double norm_r0;
+    args->solver->init_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
-    if(args->solver_type == "gmres"){
-        norm_r0 = euclidean_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
-    }
-    else{
-        norm_r0 = infty_vec_norm_cpu(args->solver->r, args->coo_mat->n_cols);
-    }
-    args->loop_params->stopping_criteria = args->loop_params->tol * norm_r0; 
-
-
-#ifdef DEBUG_MODE
-    printf("norm(initial residual) = %f\n", norm_r0);
-    printf("stopping criteria = %f\n",args->loop_params->stopping_criteria);
-    std::cout << "stopping criteria = " << args->loop_params->tol <<  " * " <<  norm_r0 << " = " << args->loop_params->stopping_criteria << std::endl;
-#endif
+    args->loop_params->stopping_criteria = args->loop_params->compute_stopping_criteria(args->solver_type, args->solver->r, args->coo_mat->n_cols);
 
 // #ifdef __CUDACC__
 //     // The first residual is computed on the host, and given to the device

@@ -39,6 +39,7 @@ void gs_iteration_ref_cpu(
 void gs_iteration_sep_cpu(
     SparseMtxFormat *sparse_mat,
     double *tmp,
+    double *tmp_perm,
     double *D,
     double *b,
     double *x,
@@ -46,6 +47,9 @@ void gs_iteration_sep_cpu(
 ){
     // spmv on strictly upper triangular portion of A to compute tmp <- Ux_{k-1}
 #ifdef USE_USPMV
+#ifdef USE_AP
+    // TODO
+#else
     uspmv_omp_scs_cpu(
         sparse_mat->scs_U->C,
         sparse_mat->scs_U->n_chunks,
@@ -54,8 +58,10 @@ void gs_iteration_sep_cpu(
         &(sparse_mat->scs_U->col_idxs)[0],
         &(sparse_mat->scs_U->values)[0],
         x,
-        tmp
+        tmp_perm
     );
+    apply_permutation(tmp, tmp_perm, &(sparse_mat->scs_U->old_to_new_idx)[0], N);
+#endif
 #else
     spmv_crs_cpu(tmp, sparse_mat->crs_U, x);
 #endif

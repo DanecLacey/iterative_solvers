@@ -45,25 +45,50 @@ void jacobi_iteration_sep_cpu(
     double *D,
     double *b,
     double *x_old,
+    double *x_old_perm,
     double *x_new,
+    double *x_new_perm,
     int n_rows
 ){
 #ifdef USE_USPMV
-        // uspmv_omp_scs_cpu<double, int>(
-        uspmv_omp_scs_cpu(
-            sparse_mat->scs_mat->C,
-            sparse_mat->scs_mat->n_chunks,
-            &(sparse_mat->scs_mat->chunk_ptrs)[0],
-            &(sparse_mat->scs_mat->chunk_lengths)[0],
-            &(sparse_mat->scs_mat->col_idxs)[0],
-            &(sparse_mat->scs_mat->values)[0],
-            x_old,
-            x_new);
+#ifdef USE_AP
+    uspmv_omp_scs_ap_cpu<int>(
+        sparse_mat->scs_mat_hp->n_chunks,
+        sparse_mat->scs_mat_hp->C,
+        &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
+        &(sparse_mat->scs_mat_hp->col_idxs)[0],
+        &(sparse_mat->scs_mat_hp->values)[0],
+        x_old,
+        x_new_perm,
+        sparse_mat->scs_mat_lp->n_chunks,
+        sparse_mat->scs_mat_lp->C,
+        &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
+        &(sparse_mat->scs_mat_lp->col_idxs)[0],
+        &(sparse_mat->scs_mat_lp->values)[0]
+    );
+    apply_permutation(x_new, x_new_perm, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
+
 #else
-        spmv_crs_cpu(x_new, sparse_mat->crs_mat, x_old);
+    uspmv_omp_scs_cpu(
+        sparse_mat->scs_mat->C,
+        sparse_mat->scs_mat->n_chunks,
+        &(sparse_mat->scs_mat->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat->chunk_lengths)[0],
+        &(sparse_mat->scs_mat->col_idxs)[0],
+        &(sparse_mat->scs_mat->values)[0],
+        x_old,
+        x_new_perm
+    );
+    apply_permutation(x_new, x_new_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+
 #endif
-        // account for diagonal element in sum, RHS, and division 
-        jacobi_normalize_x_cpu(x_new, x_old, D, b, n_rows);
+#else
+    spmv_crs_cpu(x_new, sparse_mat->crs_mat, x_old);
+#endif
+    // account for diagonal element in sum, RHS, and division 
+    jacobi_normalize_x_cpu(x_new, x_old, D, b, n_rows);
 }
 
 #ifdef __CUDACC__

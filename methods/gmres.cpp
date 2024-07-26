@@ -21,6 +21,7 @@ void gmres_iteration_ref_cpu(
     double *Q,
     double *Q_copy,
     double *w,
+    double *w_perm,
     double *R,
     double *g,
     double *g_copy,
@@ -49,12 +50,29 @@ void gmres_iteration_ref_cpu(
 
     ///////////////////// SpMV Step /////////////////////
     // w_k = A*v_k (SpMV)
+    // NOTE: We don't time the permutations in the case of USpMV, 
+    // as that is an aspect of the implementation and not necessary for Sell-C-Sigma
     timers->gmres_spmv_wtime->start_stopwatch();
 #ifdef USE_USPMV
 
 #ifdef USE_AP
-
-    uspmv_omp_csr_ap_cpu<int>(
+    // uspmv_omp_csr_ap_cpu<int>(
+    //     sparse_mat->scs_mat_hp->n_chunks,
+    //     sparse_mat->scs_mat_hp->C,
+    //     &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
+    //     &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
+    //     &(sparse_mat->scs_mat_hp->col_idxs)[0],
+    //     &(sparse_mat->scs_mat_hp->values)[0],
+    //     &V[iter_count*n_rows],
+    //     w,
+    //     sparse_mat->scs_mat_lp->n_chunks,
+    //     sparse_mat->scs_mat_lp->C,
+    //     &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
+    //     &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
+    //     &(sparse_mat->scs_mat_lp->col_idxs)[0],
+    //     &(sparse_mat->scs_mat_lp->values)[0]
+    // );
+    uspmv_omp_scs_ap_cpu<int>(
         sparse_mat->scs_mat_hp->n_chunks,
         sparse_mat->scs_mat_hp->C,
         &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
@@ -62,7 +80,7 @@ void gmres_iteration_ref_cpu(
         &(sparse_mat->scs_mat_hp->col_idxs)[0],
         &(sparse_mat->scs_mat_hp->values)[0],
         &V[iter_count*n_rows],
-        w,
+        w_perm,
         sparse_mat->scs_mat_lp->n_chunks,
         sparse_mat->scs_mat_lp->C,
         &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
@@ -71,8 +89,21 @@ void gmres_iteration_ref_cpu(
         &(sparse_mat->scs_mat_lp->values)[0]
     );
 
+    timers->gmres_spmv_wtime->end_stopwatch();
+
+    apply_permutation(w, w_perm, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
 #else
-    uspmv_omp_csr_cpu(
+    // uspmv_omp_csr_cpu(
+    //     sparse_mat->scs_mat->C,
+    //     sparse_mat->scs_mat->n_chunks,
+    //     &(sparse_mat->scs_mat->chunk_ptrs)[0],
+    //     &(sparse_mat->scs_mat->chunk_lengths)[0],
+    //     &(sparse_mat->scs_mat->col_idxs)[0],
+    //     &(sparse_mat->scs_mat->values)[0],
+    //     &V[iter_count*n_rows],
+    //     w
+    // );
+    uspmv_omp_scs_cpu(
         sparse_mat->scs_mat->C,
         sparse_mat->scs_mat->n_chunks,
         &(sparse_mat->scs_mat->chunk_ptrs)[0],
@@ -80,15 +111,24 @@ void gmres_iteration_ref_cpu(
         &(sparse_mat->scs_mat->col_idxs)[0],
         &(sparse_mat->scs_mat->values)[0],
         &V[iter_count*n_rows],
-        w
+        w_perm
     );
+
+    timers->gmres_spmv_wtime->end_stopwatch();
+
+    apply_permutation(w, w_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
 #endif
+
+
+
 
 #else
     spmv_crs_cpu(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
-#endif
 
     timers->gmres_spmv_wtime->end_stopwatch();
+#endif
+
+    
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
@@ -451,7 +491,7 @@ void allocate_gmres_structs(
 ){
     std::cout << "Allocating space for GMRES structs" << std::endl;
     double *init_v = new double[vec_size];
-    double *V = new double[vec_size * gmres_args->restart_length + 1]; // (m x n)
+    double *V = new double[vec_size * (gmres_args->restart_length + 1)]; // (m x n)
     double *Vy = new double[vec_size]; // (m x 1)
     double *H = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m) 
     double *H_tmp = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m)
@@ -495,23 +535,18 @@ void init_gmres_structs(
     std::cout << "]" << std::endl;
 #endif
     
-    #pragma omp parallel
-    {
-        init(gmres_args->V, 0.0, n_rows * (restart_len+1));
 
-        // Give v0 to first row of V
-        #pragma omp for
-        for(int i = 0; i < n_rows; ++i){
-            gmres_args->V[i] = gmres_args->init_v[i];
-        }
+    init(gmres_args->V, 0.0, n_rows * (restart_len+1));
+
+    // Give v0 to first row of V
+    #pragma omp parallel for
+    for(int i = 0; i < n_rows; ++i){
+        gmres_args->V[i] = gmres_args->init_v[i];
     }
     
     init(gmres_args->H, 0.0, restart_len * (restart_len+1));
 
-    #pragma omp parallel
-    {
-        init(gmres_args->Vy, 0.0, n_rows);
-    }
+    init(gmres_args->Vy, 0.0, n_rows);
     
     init_identity(gmres_args->R, 0.0, restart_len, (restart_len+1));
     

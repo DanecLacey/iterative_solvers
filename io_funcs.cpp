@@ -428,7 +428,18 @@ void postprocessing(
         );
     }
 
+#ifdef USE_USPMV
+#ifdef DEBUG_MODE_FINE
+    std::cout << "old_to_new_idx: [" << std::endl;
+    for(int i = 0; i < args->vec_size; ++i)
+        std::cout << args->sparse_mat->scs_mat->old_to_new_idx[i] << ", ";
+    std::cout << "]" << std::endl;
+#endif
+#endif
+
     print_timers(args);
+
+
 
 #ifdef DEBUG_MODE_FINE
     std::cout << "The solution vector is x = [" << std::endl;

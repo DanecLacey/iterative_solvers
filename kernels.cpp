@@ -670,28 +670,36 @@ void calc_residual_cpu(
     double *b,
     double *r,
     double *tmp,
+    double *tmp_perm,
     int N
 ){
-    //Unpack args 
-    #pragma omp parallel
-    {
-// Theres no reason we need to use SCS for this, right?
 #ifdef USE_USPMV
-        // uspmv_omp_scs_cpu<double, int>(
-        uspmv_omp_scs_cpu(
-            sparse_mat->scs_mat->C,
-            sparse_mat->scs_mat->n_chunks,
-            &(sparse_mat->scs_mat->chunk_ptrs)[0],
-            &(sparse_mat->scs_mat->chunk_lengths)[0],
-            &(sparse_mat->scs_mat->col_idxs)[0],
-            &(sparse_mat->scs_mat->values)[0],
-            x,
-            tmp);
+    // uspmv_omp_csr_cpu<double, int>(
+    //     sparse_mat->scs_mat->C,
+    //     sparse_mat->scs_mat->n_chunks,
+    //     &(sparse_mat->scs_mat->chunk_ptrs)[0],
+    //     &(sparse_mat->scs_mat->chunk_lengths)[0],
+    //     &(sparse_mat->scs_mat->col_idxs)[0],
+    //     &(sparse_mat->scs_mat->values)[0],
+    //     x,
+    //     tmp);
+
+    uspmv_omp_scs_cpu(
+        sparse_mat->scs_mat->C,
+        sparse_mat->scs_mat->n_chunks,
+        &(sparse_mat->scs_mat->chunk_ptrs)[0],
+        &(sparse_mat->scs_mat->chunk_lengths)[0],
+        &(sparse_mat->scs_mat->col_idxs)[0],
+        &(sparse_mat->scs_mat->values)[0],
+        x,
+        tmp_perm
+    );
+    apply_permutation(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
+
 #else
-        spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
+    spmv_crs_cpu(tmp, sparse_mat->crs_mat, x);
 #endif
-        subtract_vectors_cpu(r, b, tmp, N);
-    }
+    subtract_vectors_cpu(r, b, tmp, N);
 }
 
 #ifdef __CUDACC__

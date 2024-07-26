@@ -33,6 +33,7 @@ void gmres_iteration_ref_cpu(
     double *Q,
     double *Q_copy,
     double *w,
+    double *w_perm,
     double *R,
     double *g,
     double *g_copy,
@@ -43,7 +44,7 @@ void gmres_iteration_ref_cpu(
     int restart_count,
     int iter_count,
     double *residual_norm,
-    int restart_length
+    int restart_len
 );
 
 void allocate_gmres_structs(
