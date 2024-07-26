@@ -1,7 +1,7 @@
 include config.mk
 
 # apply solver parameters
-CXXFLAGS += -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN)
+CXXFLAGS += -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN) -DPRECISION=$(PRECISION)
 
 # compiler options
 ifeq ($(COMPILER),gcc)
@@ -109,75 +109,79 @@ ifeq ($(USE_GPROF),1)
   PROFFLAGS  += -pg -fno-inline 
 endif
 
-iterative_solvers: main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o
+# REBUILD_DEPS += $(HEADERS)
+# REBUILD_DEPS += utility_funcs.hpp io_funcs.hpp solvers.hpp kernels.hpp structs.hpp mmio.h
+# REBUILD_DEPS += methods/jacobi.hpp methods/gauss_seidel.hpp methods/gmres.hpp
+
+iterative_solvers: main.o mmio.o
 ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) main.o utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o methods/jacobi.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
+	nvcc $(CXXFLAGS) main.o mmio.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) utility_funcs.o io_funcs.o kernels.o mmio.o solvers.o main.o methods/jacobi.o methods/gauss_seidel.o methods/gmres.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) mmio.o main.o -o iterative_solvers_cpu_e53 $(LINK_LIBS) $(HEADERS)
 endif
 
 # main only depends on funcs, mmio, and structs header, not kernels
-main.o: main.cpp utility_funcs.hpp io_funcs.hpp
+main.o: main.cpp $(REBUILD_DEPS)
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) -x cu -c main.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o main.o
 else
 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o
 endif
 	
-solvers.o: solvers.cpp solvers.hpp
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c solvers.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o solvers.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c solvers.cpp -o solvers.o
-endif
+# solvers.o: solvers.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c solvers.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o solvers.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c solvers.cpp -o solvers.o
+# endif
 
-methods/jacobi.o: methods/jacobi.cpp methods/jacobi.hpp
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c methods/jacobi.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/jacobi.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/jacobi.cpp -o methods/jacobi.o $(LINK_LIBS) $(HEADERS)
-endif
+# methods/jacobi.o: methods/jacobi.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c methods/jacobi.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/jacobi.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/jacobi.cpp -o methods/jacobi.o $(LINK_LIBS) $(HEADERS)
+# endif
 
-methods/gauss_seidel.o: methods/gauss_seidel.cpp methods/gauss_seidel.hpp
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c methods/gauss_seidel.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gauss_seidel.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gauss_seidel.cpp -o methods/gauss_seidel.o $(LINK_LIBS) $(HEADERS)
-endif
+# methods/gauss_seidel.o: methods/gauss_seidel.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c methods/gauss_seidel.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gauss_seidel.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gauss_seidel.cpp -o methods/gauss_seidel.o $(LINK_LIBS) $(HEADERS)
+# endif
 
-methods/gmres.o: methods/gmres.cpp methods/gmres.hpp
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c methods/gmres.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gmres.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gmres.cpp -o methods/gmres.o $(LINK_LIBS) $(HEADERS)
-endif
-
-# funcs depends on kernels
-utility_funcs.o: utility_funcs.cpp utility_funcs.hpp kernels.o 
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c utility_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o utility_funcs.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o $(LINK_LIBS) $(HEADERS)
-endif
+# methods/gmres.o: methods/gmres.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c methods/gmres.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o methods/gmres.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c methods/gmres.cpp -o methods/gmres.o $(LINK_LIBS) $(HEADERS)
+# endif
 
 # funcs depends on kernels
-io_funcs.o: io_funcs.cpp io_funcs.hpp utility_funcs.hpp mmio.o
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c io_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o io_funcs.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c io_funcs.cpp -o io_funcs.o
-endif
+# utility_funcs.o: utility_funcs.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c utility_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o utility_funcs.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c utility_funcs.cpp -o utility_funcs.o $(LINK_LIBS) $(HEADERS)
+# endif
+
+# # funcs depends on kernels
+# io_funcs.o: io_funcs.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c io_funcs.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o io_funcs.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c io_funcs.cpp -o io_funcs.o
+# endif
 
 # only depends on "kernels" src and header, and structs header
-kernels.o: kernels.cpp kernels.hpp structs.hpp
-ifeq ($(COMPILER),nvcc)
-	nvcc $(CXXFLAGS) -x cu -c kernels.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o kernels.o
-else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c kernels.cpp -o kernels.o
-endif
+# kernels.o: kernels.cpp $(REBUILD_DEPS)
+# ifeq ($(COMPILER),nvcc)
+# 	nvcc $(CXXFLAGS) -x cu -c kernels.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o kernels.o
+# else
+# 	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c kernels.cpp -o kernels.o
+# endif
 
 # only depends on "mmio" src and header
-mmio.o: mmio.cpp mmio.h
+mmio.o: mmio.cpp $(REBUILD_DEPS)
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) -x cu -c mmio.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o mmio.o
 else

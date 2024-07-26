@@ -8,6 +8,7 @@
 #endif
 #include "mmio.h"
 
+template <typename VT>
 struct CRSMtxData
 {
     // CRSMtxData(int _n_rows, int _n_cols, int _nnz, int *_row_ptr, int *_col, double *_val) 
@@ -23,7 +24,7 @@ struct CRSMtxData
     // TODO
     // Interface* ce;
     int *row_ptr, *col;
-    double *val;
+    VT *val;
 
     // TODO
     // int *rcmPerm, *rcmInvPerm;
@@ -62,7 +63,7 @@ struct CRSMtxData
     }
 };
 
-// TODO: Make class with member funcitons
+template <typename VT>
 struct COOMtxData
 {
     int n_rows{};
@@ -74,7 +75,7 @@ struct COOMtxData
 
     std::vector<int> I;
     std::vector<int> J;
-    std::vector<double> values;
+    std::vector<VT> values;
 
     // bool operator==(COOMtxData &rhs);
 
@@ -348,20 +349,20 @@ void print(void)
 //     CRSMtxData    *crs_U
 // } crsArgType;
 
+template <typename VT>
 struct SparseMtxFormat{
 #ifdef USE_USPMV
-    ScsData<double, int> *scs_mat;
+    ScsData<VT, int> *scs_mat;
 #ifdef USE_AP
     ScsData<double, int> *scs_mat_hp;
     ScsData<float, int> *scs_mat_lp;
-    // ScsData<double, int> *scs_mat_lp;
 #endif
-    ScsData<double, int> *scs_L;
-    ScsData<double, int> *scs_U;
+    ScsData<VT, int> *scs_L;
+    ScsData<VT, int> *scs_U;
 #endif
-    CRSMtxData *crs_mat;
-    CRSMtxData *crs_L;
-    CRSMtxData *crs_U;
+    CRSMtxData<VT> *crs_mat;
+    CRSMtxData<VT> *crs_L;
+    CRSMtxData<VT> *crs_U;
 };
 
 #endif
