@@ -8,6 +8,54 @@
 #include "../../Ultimate-SpMV/code/interface.hpp"
 #endif
 
+#ifdef __CUDACC__
+__global__
+void jacobi_normalize_x_gpu(
+    double *d_x_new,
+    const double *d_x_old,
+    const double *d_D,
+    const double *d_b,
+    int n_rows
+){
+    int thread_idx_in_block = threadIdx.x;
+    int block_offset = blockIdx.x*blockDim.x;
+    int thread_idx = block_offset + thread_idx_in_block;
+    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
+    unsigned int offset = 0;
+    unsigned int row_idx;
+
+    while(thread_idx + offset < n_rows){
+        row_idx = thread_idx + offset;
+        double adjusted_x = d_x_new[row_idx] - d_D[row_idx] * d_x_old[row_idx];
+        d_x_new[row_idx] = (d_b[row_idx] - adjusted_x) / d_D[row_idx];
+
+        offset += stride;
+    }
+}
+#endif
+
+
+template <typename VT>
+void jacobi_normalize_x_cpu(
+    VT *x_new,
+    const VT *x_old,
+    const VT *D,
+    const VT *rhs,
+    int n_rows
+){
+    VT adjusted_x;
+
+    #pragma omp parallel for schedule (static)
+    for(int row_idx = 0; row_idx < n_rows; ++row_idx){
+        adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
+        x_new[row_idx] = (rhs[row_idx] - adjusted_x)/ D[row_idx];
+#ifdef DEBUG_MODE_FINE
+            std::cout << rhs[row_idx] << " - " << adjusted_x << " / " << D[row_idx] << " = " << x_new[row_idx] << " at idx: " << row_idx << std::endl; 
+#endif
+    }
+}
+
+
 template <typename VT>
 void jacobi_iteration_ref_cpu(
     SparseMtxFormat<VT> *sparse_mat,

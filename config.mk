@@ -17,7 +17,7 @@ TOL=1e-12
  # [int]
 GMRES_RESTART_LEN=110
  # ["double"/"float"]
-PRECISION=float
+PRECISION=double
 
 ### Debugging ###
  # [1/0]
@@ -43,12 +43,12 @@ USE_EIGEN = 0
 
 # [1/0]
 USE_SCAMAC = 0
-# SCAMAC_INC = -I/home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/scamac/include/
-# SCAMAC_LIB = /home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/library/libscamac.a
+SCAMAC_INC = -I/home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/scamac/include/
+SCAMAC_LIB = /home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/library/libscamac.a
 
 # NOTE: We assume USpMV is in the same directory
 # [1/0]
-USE_USPMV = 1
+USE_USPMV = 0
 # [1/0]
 USE_AP = 1
 # [float]

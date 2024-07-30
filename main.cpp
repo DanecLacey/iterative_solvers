@@ -87,7 +87,7 @@ void preprocessing(
 #endif
 
     // Allocate structs specific to each solver
-    solver->allocate_cpu_solver_structs(args->vec_size, args->coo_mat->n_cols);
+    solver->allocate_cpu_solver_structs(args->sparse_mat, args->coo_mat, args->vec_size);
 
 #ifdef USE_USPMV
 #ifdef USE_AP
@@ -127,7 +127,8 @@ void preprocessing(
 #ifdef __CUDACC__
     gpu_copy_structs(args);
 #endif
-    calc_residual_cpu<VT>(args->sparse_mat, solver->x_old, solver->b, solver->r, solver->tmp, solver->tmp_perm, args->coo_mat->n_cols);
+
+    solver->init_residual(args->sparse_mat, args->coo_mat->n_cols);
 
 #ifdef DEBUG_MODE
     printf("initial residual = [");
@@ -139,7 +140,7 @@ void preprocessing(
 
     solver->init_structs(args->sparse_mat, args->coo_mat, args->timers, args->vec_size);
 
-    args->loop_params->stopping_criteria = args->loop_params->compute_stopping_criteria(args->solver_type, solver->r, args->coo_mat->n_cols);
+    args->loop_params->stopping_criteria = args->loop_params->template compute_stopping_criteria<VT>(args->solver_type, solver->r, args->coo_mat->n_cols);
 
 // #ifdef __CUDACC__
 //     // The first residual is computed on the host, and given to the device
@@ -174,7 +175,7 @@ void run_solver(
 
     assign_cli_inputs<VT>(args, argc, argv, &matrix_file_name);
 
-    Solver<VT> *solver = new Solver<VT>(args->solver_type);
+    Solver<VT> *solver = new Solver<VT>(args->solver_type, args->preconditioner_type);
     gmresArgs<VT> *gmres_args = new gmresArgs<VT>;
     solver->gmres_args = gmres_args;
 
@@ -328,7 +329,7 @@ int main(int argc, char *argv[]){
         0.0, // init stopping criteria
         TOL, // tolerance to stop iterations
         1.0, // init value for b
-        0.0, // init value for x
+        1.0, // init value for x
         GMRES_RESTART_LEN // GMRES restart length
     };
 ////////////////////////////////////////////////

@@ -38,9 +38,10 @@ struct LoopParams
     double init_x;
     int gmres_restart_len;
 
+    template <typename VT>
     double compute_stopping_criteria(
         std::string solver_type,
-        double *r,
+        VT *r,
         int n_cols
     ){
         // Precalculate stopping criteria
@@ -63,7 +64,7 @@ struct LoopParams
         std::cout << "stopping criteria = " << this->tol <<  " * " <<  norm_r0 << " = " << stopping_criteria << std::endl;
 #endif
 
-        return stopping_critera; 
+        return static_cast<double>(stopping_critera); 
     }
 };
 
@@ -88,6 +89,7 @@ struct argType {
 #endif
     LoopParams *loop_params;
     std::string solver_type;
+    std::string preconditioner_type;
     Flags *flags;
     const std::string *matrix_file_name;
     double calc_time_elapsed;

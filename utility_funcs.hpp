@@ -348,7 +348,7 @@ void record_residual_norm(
     Flags *flags,
     SparseMtxFormat<VT> *sparse_mat,
     double *residual_norm,
-    double *r,
+    VT *r,
     VT *x,
     VT *b,
     VT *x_new,
@@ -432,12 +432,12 @@ void split_range(ScamacIdx a, ScamacIdx b, ScamacIdx n, ScamacIdx i, ScamacIdx *
   }
 }
 
-
+template <typename VT>
 void scamac_generate(
-    argType *args,
+    argType<VT> *args,
     int* scamac_nrows,
     int* scamac_nnz,
-    COOMtxData *mtx
+    COOMtxData<double> *mtx
 ){
 
 /**  examples/MPI/ex_count_mpi.c
@@ -610,7 +610,7 @@ void scamac_make_mtx(
     int scamac_nnz = 0;
 
     // Fill scs arrays with proper data
-    scamac_generate(
+    scamac_generate<VT>(
         args, 
         &scamac_nrows,
         &scamac_nnz,

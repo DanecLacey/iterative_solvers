@@ -91,7 +91,7 @@ void subtract_vectors_cpu(
 
 template <typename VT>
 void subtract_residual_cpu(
-    double *residual_vec,
+    VT *residual_vec,
     const VT *vec1,
     const VT *vec2,
     int N,
@@ -155,7 +155,7 @@ void scale(
 template <typename VT>
 void scale_residual(
     VT *result_vec,
-    const double *res,
+    const VT *res,
     const double scalar,
     int N
 ){
@@ -395,9 +395,9 @@ void spmv_crs_cpu(
             #pragma omp simd simdlen(VECTOR_LENGTH) reduction(+:tmp)
             for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
                 tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
-    #ifdef DEBUG_MODE_FINE
-                std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
-    #endif
+    // #ifdef DEBUG_MODE_FINE
+    //             std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+    // #endif
             }
             y[row_idx] = tmp;
         }
@@ -448,57 +448,11 @@ void spmv_crs_gpu(
 #endif
 
 template <typename VT>
-void jacobi_normalize_x_cpu(
-    VT *x_new,
-    const VT *x_old,
-    const VT *D,
-    const VT *b,
-    int n_rows
-){
-    VT adjusted_x;
-
-    #pragma omp parallel for schedule (static)
-    for(int row_idx = 0; row_idx < n_rows; ++row_idx){
-        adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
-        x_new[row_idx] = (b[row_idx] - adjusted_x)/ D[row_idx];
-#ifdef DEBUG_MODE_FINE
-            std::cout << b[row_idx] << " - " << adjusted_x << " / " << D[row_idx] << " = " << x_new[row_idx] << " at idx: " << row_idx << std::endl; 
-#endif
-    }
-}
-
-#ifdef __CUDACC__
-__global__
-void jacobi_normalize_x_gpu(
-    double *d_x_new,
-    const double *d_x_old,
-    const double *d_D,
-    const double *d_b,
-    int n_rows
-){
-    int thread_idx_in_block = threadIdx.x;
-    int block_offset = blockIdx.x*blockDim.x;
-    int thread_idx = block_offset + thread_idx_in_block;
-    const unsigned int stride = gridDim.x * blockDim.x; // <- equiv. to total num threads
-    unsigned int offset = 0;
-    unsigned int row_idx;
-
-    while(thread_idx + offset < n_rows){
-        row_idx = thread_idx + offset;
-        double adjusted_x = d_x_new[row_idx] - d_D[row_idx] * d_x_old[row_idx];
-        d_x_new[row_idx] = (d_b[row_idx] - adjusted_x) / d_D[row_idx];
-
-        offset += stride;
-    }
-}
-#endif
-
-template <typename VT>
 void spltsv_crs(
     const CRSMtxData<VT> *crs_L,
     VT *x,
     const VT *D,
-    const VT *b_Ux
+    const VT *rhs
 )
 {
     double sum;
@@ -506,14 +460,14 @@ void spltsv_crs(
         sum = 0.0;
         for(int nz_idx = crs_L->row_ptr[row_idx]; nz_idx < crs_L->row_ptr[row_idx+1]; ++nz_idx){
             sum += crs_L->val[nz_idx] * x[crs_L->col[nz_idx]];
-#ifdef DEBUG_MODE_FINE
-            std::cout << crs_L->val[nz_idx] << " * " << x[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * x[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
-#endif
+// #ifdef DEBUG_MODE_FINE
+//             std::cout << crs_L->val[nz_idx] << " * " << x[crs_L->col[nz_idx]] << " = " << crs_L->val[nz_idx] * x[crs_L->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+// #endif
         }
-        x[row_idx] = (b_Ux[row_idx] - sum)/D[row_idx];
-#ifdef DEBUG_MODE_FINE
-        std::cout << b_Ux[row_idx] << " - " << sum << " / " << D[row_idx] << " = " << x[row_idx] << " at idx: " << row_idx << std::endl; 
-#endif
+        x[row_idx] = (rhs[row_idx] - sum)/D[row_idx];
+// #ifdef DEBUG_MODE_FINE
+//         std::cout << rhs[row_idx] << " - " << sum << " / " << D[row_idx] << " = " << x[row_idx] << " at idx: " << row_idx << std::endl; 
+// #endif
     }
 }
 
@@ -589,7 +543,6 @@ VT euclidean_vec_norm_cpu(
 ){
     double tmp = 0.0;
 
-    // Orphaned Directive
     #pragma omp parallel for reduction(+:tmp)
     for(int i = 0; i < N; ++i){
         tmp += vec[i] * vec[i];
@@ -599,8 +552,9 @@ VT euclidean_vec_norm_cpu(
     return std::sqrt(tmp);
 }
 
-double infty_vec_norm_cpu(
-    const double *vec,
+template <typename VT>
+VT infty_vec_norm_cpu(
+    const VT *vec,
     int N
 ){
     double max_abs = 0.;
@@ -713,7 +667,7 @@ void calc_residual_cpu(
     SparseMtxFormat<VT> *sparse_mat,
     VT *x,
     VT *b,
-    double *r,
+    VT *r,
     VT *tmp,
     VT *tmp_perm,
     int N

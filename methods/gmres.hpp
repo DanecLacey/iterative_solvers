@@ -33,9 +33,36 @@ struct gmresArgs
 };
 
 template <typename VT>
+void apply_gmres_preconditioner(
+    std::string preconditioner_type,
+    SparseMtxFormat<VT> *sparse_mat,
+    VT *vec,
+    VT *rhs,
+    VT *D,
+    int n_cols){
+    if(!preconditioner_type.empty()){
+        if(preconditioner_type == "jacobi"){
+            // jacobi_iteration_sep_cpu(
+            //     sparse
+            // )
+            // TODO
+        }
+        else if(preconditioner_type == "gauss-seidel"){
+            spltsv_crs<VT>(sparse_mat->crs_L, vec, D, rhs);
+        }
+        else{
+            printf("ERROR: apply_gmres_preconditioner: preconditioner_type not recognized.\n");
+            exit(1);
+        }
+    }
+}
+
+template <typename VT>
 void gmres_iteration_ref_cpu(
     SparseMtxFormat<VT> *sparse_mat,
     Timers *timers,
+    std::string preconditioner_type,
+    VT *D,
     VT *V,
     double *H,
     double *H_tmp,
@@ -147,7 +174,10 @@ void gmres_iteration_ref_cpu(
     timers->gmres_spmv_wtime->end_stopwatch();
 #endif
 
-    
+    timers->gmres_apply_preconditioner_wtime->start_stopwatch();
+    apply_gmres_preconditioner<VT>(preconditioner_type, sparse_mat, w, w, D, n_rows);
+    timers->gmres_apply_preconditioner_wtime->end_stopwatch();
+
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
@@ -539,12 +569,13 @@ void allocate_gmres_structs(
 template <typename VT>
 void init_gmres_structs(
     gmresArgs<VT> *gmres_args,
-    double *r,
+    VT *r,
     int n_rows
 ){
     int restart_len = gmres_args->restart_length;
 
     gmres_args->beta = euclidean_vec_norm_cpu(r, n_rows);
+
     scale_residual<VT>(gmres_args->init_v, r, 1 / gmres_args->beta, n_rows);
 
 #ifdef DEBUG_MODE
@@ -632,6 +663,11 @@ void init_gmres_timers(Timers *timers){
     timeval *gmres_get_x_end = new timeval;
     Stopwatch *gmres_get_x_wtime = new Stopwatch(gmres_get_x_start, gmres_get_x_end);
     timers->gmres_get_x_wtime = gmres_get_x_wtime;
+
+    timeval *gmres_apply_preconditioner_start = new timeval;
+    timeval *gmres_apply_preconditioner_end = new timeval;
+    Stopwatch *gmres_apply_preconditioner_wtime = new Stopwatch(gmres_apply_preconditioner_start, gmres_apply_preconditioner_end);
+    timers->gmres_apply_preconditioner_wtime = gmres_apply_preconditioner_wtime;
 }
 
 template <typename VT>

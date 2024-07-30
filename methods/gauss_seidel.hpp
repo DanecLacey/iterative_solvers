@@ -102,7 +102,7 @@ void gs_iteration_sep_cpu(
 }
 
 template <typename VT>
-void init_gs_structs(
+void allocate_gs_structs(
     COOMtxData<double> *coo_mat,
     SparseMtxFormat<VT> *sparse_mat
 ){

@@ -26,8 +26,8 @@ void assign_cli_inputs(
     std::string *matrix_file_name
     )
 {
-    if(argc != 3){
-        printf("ERROR: assign_cli_inputs: Please only select a .mtx file name and solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient)].\n");
+    if(argc > 5){
+        printf("ERROR: assign_cli_inputs: Please only select a .mtx file name and solver type:\n-j (Jacobi)\n-gs (Gauss-Seidel)\n-gm ([Preconditioned] GMRES)\n-cg ([Preconditioned] Conjugate Gradient)\n");
         exit(1);
     }
 
@@ -35,6 +35,7 @@ void assign_cli_inputs(
     args->scamac_args = argv[1];
 #else
     *matrix_file_name = argv[1];
+    // TODO: more validation
     // if(fn.substr(matrix_file_name->find_last_of(".") + 1) == "mtx")
     //     printf("ERROR: assign_cli_inputs: Verify you are using an .mtx file. \n");
     // exit(1);
@@ -57,10 +58,33 @@ void assign_cli_inputs(
         args->solver_type = "gmres";
     }
     else{
-        printf("ERROR: assign_cli_inputs: Please choose an available solver type [-j (Jacobi) / -gs (Gauss-Seidel) / -cg (Conjugate Gradient) / -gm (GMRES)].\n");
+        printf("ERROR: assign_cli_inputs: Please choose an available solver type:\n-j (Jacobi)\n-gs (Gauss-Seidel)\n-[p]gm ([Preconditioned] GMRES)\n-[p]cg ([Preconditioned] Conjugate Gradient)\n");
         exit(1);
     }
 
+    // Scan remaining incoming args
+    int args_start_index = 3;
+    for (int i = args_start_index; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "-p"){
+           std::string pt = argv[++i];
+
+            if (pt == "j"){
+                args->preconditioner_type = "jacobi";
+            }
+            else if (pt == "gs"){
+                args->preconditioner_type = "gauss-seidel";
+            }
+            else{
+                printf("ERROR: assign_cli_inputs: Please choose an available preconditioner type:\n-j (Jacobi)\n-gs (Gauss-Seidel)\n");
+                exit(1);
+            }
+        }
+        else{
+            std::cout << "ERROR: assign_cli_inputs: Arguement \"" << arg << "\" not recongnized." << std::endl;
+        }
+    }
 }
 
 void read_mtx(
@@ -310,11 +334,13 @@ void print_timers(argType<VT> *args){
     long double compute_Q_wtime;
     long double compute_R_wtime;
     long double get_x_wtime;
+    long double apply_preconditioner_wtime;
 
     if(args->solver_type == "gmres"){
         spmv_wtime = args->timers->gmres_spmv_wtime->get_wtime();
         orthog_wtime = args->timers->gmres_orthog_wtime->get_wtime();
         mgs_wtime = args->timers->gmres_mgs_wtime->get_wtime();
+        apply_preconditioner_wtime = args->timers->gmres_apply_preconditioner_wtime->get_wtime();
 #ifdef FINE_TIMERS
         mgs_dot_wtime = args->timers->gmres_mgs_dot_wtime->get_wtime();
         mgs_sub_wtime = args->timers->gmres_mgs_sub_wtime->get_wtime();
@@ -345,25 +371,26 @@ void print_timers(argType<VT> *args){
     }
 
     if(args->solver_type == "gmres"){
-        std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "               << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "  << std::right << std::setw(right_flush_width) << orthog_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: "      << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "                 << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Apply Precon: " << std::right << std::setw(right_flush_width) << apply_preconditioner_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Orthogonalization: "    << std::right << std::setw(right_flush_width) << orthog_wtime  << "[s]" <<std::endl;
 #ifdef FINE_TIMERS 
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "              << std::right << std::setw(right_flush_width) << mgs_wtime  << "[s]" <<std::endl;       
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | MGS: "                << std::right << std::setw(right_flush_width) << mgs_wtime  << "[s]" <<std::endl;       
         std::cout << std::left << std::setw(left_flush_width) << "| | | | | Dot: "              << std::right << std::setw(right_flush_width) << mgs_dot_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | | | Sub: "              << std::right << std::setw(right_flush_width) << mgs_sub_wtime  << "[s]" <<std::endl;
         long double orthog_tmp = mgs_wtime;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "              << std::right << std::setw(right_flush_width) << orthog_wtime - orthog_tmp  << "[s]" <<std::endl;
 #endif
-        std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "   << std::right << std::setw(right_flush_width) << leastsq_wtime  << "[s]" <<std::endl;
-#ifdef FINE_TIMERS
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "    << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  << "[s]" <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "        << std::right << std::setw(right_flush_width) << compute_Q_wtime  << "[s]" <<std::endl;
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "        << std::right << std::setw(right_flush_width) << compute_R_wtime  << "[s]" <<std::endl;
-        long double leastsq_tmp = compute_H_tmp_wtime + compute_Q_wtime + compute_R_wtime; 
-        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "            << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp << "[s]" << std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Givens Rotations: "     << std::right << std::setw(right_flush_width) << leastsq_wtime  << "[s]" <<std::endl;
+#ifdef FINE_TIMERS  
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute H_tmp: "      << std::right << std::setw(right_flush_width) << compute_H_tmp_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute Q: "          << std::right << std::setw(right_flush_width) << compute_Q_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Compute R: "          << std::right << std::setw(right_flush_width) << compute_R_wtime  << "[s]" <<std::endl;
+        long double leastsq_tmp = compute_H_tmp_wtime + compute_Q_wtime + compute_R_wtime;   
+        std::cout << std::left << std::setw(left_flush_width) << "| | | | Other: "              << std::right << std::setw(right_flush_width) << leastsq_wtime - leastsq_tmp << "[s]" << std::endl;
 #endif
-        std::cout << std::left << std::setw(left_flush_width) << "| | | Get x: "               << std::right << std::setw(right_flush_width) << get_x_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Get x: "                << std::right << std::setw(right_flush_width) << get_x_wtime  << "[s]" <<std::endl;
 
         solver_wtime += get_x_wtime;
 
@@ -453,7 +480,7 @@ void postprocessing(
 #ifdef DEBUG_MODE_FINE
     std::cout << "The solution vector is x = [" << std::endl;
     for(int i = 0; i < args->vec_size; ++i){
-        printf("%f, ", args->solver->x_star[i]);
+        printf("%f, ", solver->x_star[i]);
     }
     std::cout << "]" << std::endl;
 #endif

@@ -121,7 +121,7 @@ iterative_solvers: main.o mmio.o
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) main.o mmio.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) mmio.o main.o -o iterative_solvers_cpu_ap $(LINK_LIBS) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) mmio.o main.o -o iterative_solvers_cpu $(LINK_LIBS) $(HEADERS)
 endif
 
 # main only depends on funcs, mmio, and structs header, not kernels
@@ -129,7 +129,7 @@ main.o: main.cpp $(REBUILD_DEPS)
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) -x cu -c main.cpp $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o main.o
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) -c main.cpp -o main.o  $(LINK_LIBS) $(HEADERS)
 endif
 	
 # solvers.o: solvers.cpp $(REBUILD_DEPS)
