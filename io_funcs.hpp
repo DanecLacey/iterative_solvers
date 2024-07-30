@@ -63,10 +63,9 @@ void assign_cli_inputs(
 
 }
 
-template <typename VT>
 void read_mtx(
     const std::string matrix_file_name,
-    COOMtxData<VT> *coo_mat
+    COOMtxData<double> *coo_mat
     )
 {
     char* filename = const_cast<char*>(matrix_file_name.c_str());

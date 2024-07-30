@@ -73,10 +73,11 @@ void sum_vectors(
     }
 }
 
+template <typename VT>
 void subtract_vectors_cpu(
-    double *result_vec,
-    const double *vec1,
-    const double *vec2,
+    VT *result_vec,
+    const VT *vec1,
+    const VT *vec2,
     int N,
     double scale = 1.0
 ){
@@ -84,6 +85,22 @@ void subtract_vectors_cpu(
     #pragma omp parallel for
     for (int i = 0; i < N; ++i){
         result_vec[i] = vec1[i] - scale*vec2[i];
+        // std::cout << vec1[i] << " - " << scale << "*" << vec2[i] <<std::endl;
+    }
+}
+
+template <typename VT>
+void subtract_residual_cpu(
+    double *residual_vec,
+    const VT *vec1,
+    const VT *vec2,
+    int N,
+    double scale = 1.0
+){
+    // Not an Orphaned directive!
+    #pragma omp parallel for
+    for (int i = 0; i < N; ++i){
+        residual_vec[i] = vec1[i] - scale*vec2[i];
         // std::cout << vec1[i] << " - " << scale << "*" << vec2[i] <<std::endl;
     }
 }
@@ -118,9 +135,10 @@ void dense_transpose(
 
 }
 
+template <typename VT>
 void scale(
-    double *result_vec,
-    const double *vec,
+    VT *result_vec,
+    const VT *vec,
     const double scalar,
     int N
 ){
@@ -134,9 +152,27 @@ void scale(
     }
 }
 
+template <typename VT>
+void scale_residual(
+    VT *result_vec,
+    const double *res,
+    const double scalar,
+    int N
+){
+    #pragma omp parallel for
+    for (int i = 0; i < N; ++i){
+        result_vec[i] = res[i] * scalar;
+#ifdef DEBUG_MODE_FINE
+        std::cout << "scaling" << std::endl;
+        std::cout << result_vec[i] << " = " << res[i] << " * " << scalar << std::endl;
+#endif
+    }
+}
+
+template <typename VT>
 void dot(
-    const double *vec1,
-    const double *vec2,
+    const VT *vec1,
+    const VT *vec2,
     double *result,
     int N
 ){
@@ -343,13 +379,11 @@ void sum_matrices(
 
 template<typename VT>
 void spmv_crs_cpu(
-    double *y,
+    VT *y,
     const CRSMtxData<VT> *crs_mat,
-    double *x
+    VT *x
     )
 {
-    VT tmp{};
-
     #pragma omp parallel
     {
 #ifdef USE_LIKWID
@@ -357,7 +391,8 @@ void spmv_crs_cpu(
 #endif
         #pragma omp for schedule(static)
         for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-            tmp = 0.0;
+            double tmp = 0.0;
+            #pragma omp simd simdlen(VECTOR_LENGTH) reduction(+:tmp)
             for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
                 tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
     #ifdef DEBUG_MODE_FINE
@@ -412,11 +447,12 @@ void spmv_crs_gpu(
 }
 #endif
 
+template <typename VT>
 void jacobi_normalize_x_cpu(
-    double *x_new,
-    const double *x_old,
-    const double *D,
-    const double *b,
+    VT *x_new,
+    const VT *x_old,
+    const VT *D,
+    const VT *b,
     int n_rows
 ){
     VT adjusted_x;
@@ -460,9 +496,9 @@ void jacobi_normalize_x_gpu(
 template <typename VT>
 void spltsv_crs(
     const CRSMtxData<VT> *crs_L,
-    double *x,
-    const double *D,
-    const double *b_Ux
+    VT *x,
+    const VT *D,
+    const VT *b_Ux
 )
 {
     double sum;
@@ -506,7 +542,7 @@ void dense_MMM(
 template <typename VT>
 void dense_MMM_t(
     VT *A,
-    double *B,
+    VT *B,
     double *C,
     int n_rows_A,
     int n_cols_A,
@@ -546,8 +582,9 @@ void dense_MMM_t_t(
     }
 }
 
-double euclidean_vec_norm_cpu(
-    const double *vec,
+template <typename VT>
+VT euclidean_vec_norm_cpu(
+    const VT *vec,
     int N
 ){
     double tmp = 0.0;
@@ -674,11 +711,11 @@ void infty_vec_norm_gpu(
  template <typename VT>
 void calc_residual_cpu(
     SparseMtxFormat<VT> *sparse_mat,
-    double *x,
-    double *b,
+    VT *x,
+    VT *b,
     double *r,
-    double *tmp,
-    double *tmp_perm,
+    VT *tmp,
+    VT *tmp_perm,
     int N
 ){
 
@@ -703,12 +740,12 @@ void calc_residual_cpu(
         x,
         tmp_perm
     );
-    apply_permutation<double, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
+    apply_permutation<VT, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
 
 #else
     spmv_crs_cpu<VT>(tmp, sparse_mat->crs_mat, x);
 #endif
-    subtract_vectors_cpu(r, b, tmp, N);
+    subtract_residual_cpu(r, b, tmp, N);
 }
 
 #ifdef __CUDACC__

@@ -1,7 +1,7 @@
 include config.mk
 
 # apply solver parameters
-CXXFLAGS += -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN) -DPRECISION=$(PRECISION)
+CXXFLAGS += -DVECTOR_LENGTH=$(VECTOR_LENGTH) -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN) -DPRECISION=$(PRECISION)
 
 # compiler options
 ifeq ($(COMPILER),gcc)
@@ -68,8 +68,12 @@ endif
 ifeq ($(USE_USPMV),1)
   ifeq ($(USE_AP),1)
     CXXFLAGS += -DUSE_AP -DAP_THRESHOLD=$(AP_THRESHOLD)
+    ifeq ($(PRECISION),float)
+      $(warning Adaptive Precision should not be used with PRECISION=float, switching to PRECISION=double)
+      PRECISION=double
+    endif
   endif
-  CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA) -DVECTOR_LENGTH=$(VECTOR_LENGTH)
+  CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA)
   ifeq ($(COMPILER),nvcc)
     $(warning CUDA with USpMV and C or SIGMA > 1 not yet supported)
   endif
@@ -117,7 +121,7 @@ iterative_solvers: main.o mmio.o
 ifeq ($(COMPILER),nvcc)
 	nvcc $(CXXFLAGS) main.o mmio.o $(DEBUGFLAGS) $(GPGPU_ARCH_FLAGS) -Xcompiler -Wall -DBLOCKS_PER_GRID=$(BLOCKS_PER_GRID) -DTHREADS_PER_BLOCK=$(THREADS_PER_BLOCK) -o iterative_solvers_gpu
 else
-	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) mmio.o main.o -o iterative_solvers_cpu_e53 $(LINK_LIBS) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(DEBUGFLAGS) $(PROFFLAGS) mmio.o main.o -o iterative_solvers_cpu_ap $(LINK_LIBS) $(HEADERS)
 endif
 
 # main only depends on funcs, mmio, and structs header, not kernels

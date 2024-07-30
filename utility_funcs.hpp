@@ -64,10 +64,10 @@ void init_identity(
 
 template <typename VT>
 void generate_vector(
-    double *vec_to_populate,
+    VT *vec_to_populate,
     int size,
     bool rand_flag,
-    VT *values,
+    double *values,
     double initial_val
 ){
     if(rand_flag){
@@ -153,8 +153,8 @@ void gen_neg_inv(
 
 template <typename VT>
 void extract_diag(
-    const COOMtxData<VT> *coo_mat,
-    double *diag
+    const COOMtxData<double> *coo_mat,
+    VT *diag
 ){
     #pragma omp parallel for schedule (static)
     for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
@@ -296,7 +296,7 @@ void split_L_U(
 
 template<typename VT>
 void convert_to_crs(
-    COOMtxData<VT> *coo_mat,
+    COOMtxData<double> *coo_mat,
     CRSMtxData<VT> *crs_mat
     )
 {
@@ -349,11 +349,11 @@ void record_residual_norm(
     SparseMtxFormat<VT> *sparse_mat,
     double *residual_norm,
     double *r,
-    double *x,
-    double *b,
-    double *x_new,
-    double *tmp,
-    double *tmp_perm
+    VT *x,
+    VT *b,
+    VT *x_new,
+    VT *tmp,
+    VT *tmp_perm
 ){
     if(args->solver_type == "jacobi"){
         calc_residual_cpu<VT>(sparse_mat, x_new, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
@@ -393,8 +393,9 @@ void record_residual_norm(
        
 }
 
+template <typename VT>
 void iter_output(
-    const double *x_approx,
+    const VT *x_approx,
     int N,
     int iter_count
 ){
@@ -404,8 +405,9 @@ void iter_output(
     }
 }
 
+template <typename VT>
 void scale_vector(    
-    double *vec_to_scale,
+    VT *vec_to_scale,
     std::vector<double> *largest_elems,
     int vec_len
 ){
@@ -602,7 +604,7 @@ void scamac_generate(
 template <typename VT>
 void scamac_make_mtx(
     argType<VT> *args,
-    COOMtxData<VT> *coo_mat
+    COOMtxData<double> *coo_mat
 ){
     int scamac_nrows = 0;
     int scamac_nnz = 0;

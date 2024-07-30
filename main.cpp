@@ -61,7 +61,7 @@ void preprocessing(
 
 #ifdef USE_USPMV
     // Convert COO mat to Sell-C-Simga
-    MtxData<VT, int> *mtx_mat = new MtxData<VT, int>;
+    MtxData<double, int> *mtx_mat = new MtxData<double, int>;
     mtx_mat->n_rows = args->coo_mat->n_rows;
     mtx_mat->n_cols = args->coo_mat->n_cols;
     mtx_mat->nnz = args->coo_mat->nnz;
@@ -71,8 +71,7 @@ void preprocessing(
     mtx_mat->J = args->coo_mat->J;
     mtx_mat->values = args->coo_mat->values;
 
-    // NOTE: Symmetric permutation, i.e. rows and columns
-    convert_to_scs<VT, int>(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
+    convert_to_scs<double, VT, int>(mtx_mat, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat);
 
     // NOTE: We change vec_size here, so all structs from here on will be different size!
     args->vec_size = args->sparse_mat->scs_mat->n_rows_padded;
@@ -95,23 +94,21 @@ void preprocessing(
     // Convert MTX mat to Sell-C-Simga in the case of AP
     MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
     MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
-    // MtxData<double, int> *mtx_mat_lp = new MtxData<double, int>;
-    seperate_lp_from_hp<VT, int>(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_row_elems, &largest_col_elems, AP_THRESHOLD, true);
+
+    seperate_lp_from_hp<double, int>(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_row_elems, &largest_col_elems, AP_THRESHOLD, true);
     args->lp_percent = mtx_mat_lp->nnz / (double)mtx_mat->nnz;
     args->hp_percent = mtx_mat_hp->nnz / (double)mtx_mat->nnz;
 
     std::cout << "Converting HP struct" << std::endl;
-    convert_to_scs<double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
+    convert_to_scs<double, double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
     std::cout << "Converting LP struct" << std::endl;
-    convert_to_scs<float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp, &(args->sparse_mat->scs_mat_hp->old_to_new_idx)[0]); 
+    convert_to_scs<float, float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp, &(args->sparse_mat->scs_mat_hp->old_to_new_idx)[0]); 
 #endif
 #endif
 
     // Just convenient to have a CRS copy too
     convert_to_crs<VT>(args->coo_mat, args->sparse_mat->crs_mat);
 
-
-    
 #ifdef __CUDACC__
     gpu_allocate_copy_sparse_mat(args);
 #endif
@@ -121,11 +118,11 @@ void preprocessing(
     // Make b vector
     generate_vector<VT>(solver->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
     // ^ b should likely draw from A(min) to A(max) range of values
-    scale_vector(solver->b, &largest_row_elems, args->vec_size);
+    scale_vector<VT>(solver->b, &largest_row_elems, args->vec_size);
 
     // Make initial x vector
     generate_vector<VT>(solver->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
-    scale_vector(solver->x_old, &largest_row_elems, args->vec_size);
+    scale_vector<VT>(solver->x_old, &largest_row_elems, args->vec_size);
 
 #ifdef __CUDACC__
     gpu_copy_structs(args);
@@ -168,7 +165,7 @@ void run_solver(
     Stopwatch *total_wtime = new Stopwatch(total_time_start, total_time_end);
     std::string matrix_file_name;
     SparseMtxFormat<VT> *sparse_mat = new SparseMtxFormat<VT>;
-    COOMtxData<VT> *coo_mat = new COOMtxData<VT>;
+    COOMtxData<double> *coo_mat = new COOMtxData<double>;
     argType<VT> *args = new argType<VT>;
 
     args->timers = timers;
@@ -178,7 +175,7 @@ void run_solver(
     assign_cli_inputs<VT>(args, argc, argv, &matrix_file_name);
 
     Solver<VT> *solver = new Solver<VT>(args->solver_type);
-    gmresArgs *gmres_args = new gmresArgs;
+    gmresArgs<VT> *gmres_args = new gmresArgs<VT>;
     solver->gmres_args = gmres_args;
 
 
@@ -188,7 +185,7 @@ void run_solver(
         scamac_make_mtx(args, coo_mat);
 #else
         std::cout << "Reading Matrix" << std::endl;
-        read_mtx<VT>(matrix_file_name, coo_mat);
+        read_mtx(matrix_file_name, coo_mat);
 #endif
 
         args->loop_params = loop_params;

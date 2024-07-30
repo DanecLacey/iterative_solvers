@@ -1,21 +1,23 @@
-### Compilers ###
-# Options: gcc, icc, icx, nvcc
+# [gcc, icc, icx, nvcc]
 COMPILER=icx
-# Only applicable for gpu builds
-# Options: a40, a100
+# [a40, a100]
 GPGPU_ARCH=a100
+# [int]
 THREADS_PER_BLOCK=32
+# [int]
 BLOCKS_PER_GRID=256
+# [int]
+VECTOR_LENGTH = 8
 
 ### Solver Parameters ###
 # [int]
 MAX_ITERS=20000
 # [float]
-TOL=1e-12 
+TOL=1e-12
  # [int]
 GMRES_RESTART_LEN=110
  # ["double"/"float"]
-PRECISION=double
+PRECISION=float
 
 ### Debugging ###
  # [1/0]
@@ -31,7 +33,7 @@ USE_GPROF = 0
 
 ### External Libraries ###
 # [1/0]
-USE_LIKWID = 1
+USE_LIKWID = 0
 # LIKWID_INC =
 # LIKWID_LIB = 
 
@@ -50,10 +52,8 @@ USE_USPMV = 1
 # [1/0]
 USE_AP = 1
 # [float]
-AP_THRESHOLD = 0.11316002119063188
+AP_THRESHOLD = 0.0
 # [int]
 CHUNK_SIZE = 1
 # [int]
 SIGMA = 1
-# [int]
-VECTOR_LENGTH = 8

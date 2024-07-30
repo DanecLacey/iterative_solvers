@@ -13,7 +13,7 @@ void gs_iteration_ref_cpu(
     SparseMtxFormat<VT> *sparse_mat,
     VT *tmp,
     VT *D,
-    double *b,
+    VT *b,
     VT *x
 ){
     double diag_elem = 1.0;
@@ -41,11 +41,11 @@ void gs_iteration_ref_cpu(
 template <typename VT>
 void gs_iteration_sep_cpu(
     SparseMtxFormat<VT> *sparse_mat,
-    double *tmp,
-    double *tmp_perm,
-    double *D,
-    double *b,
-    double *x,
+    VT *tmp,
+    VT *tmp_perm,
+    VT *D,
+    VT *b,
+    VT *x,
     int N
 ){
     // spmv on strictly upper triangular portion of A to compute tmp <- Ux_{k-1}
@@ -78,7 +78,7 @@ void gs_iteration_sep_cpu(
 #endif
 
     // subtract b to compute tmp <- b-Ux_{k-1}
-    subtract_vectors_cpu(tmp, b, tmp, N);
+    subtract_vectors_cpu<VT>(tmp, b, tmp, N);
 
 #ifdef DEBUG_MODE_FINE
     printf("b-Ux = [");
@@ -103,18 +103,18 @@ void gs_iteration_sep_cpu(
 
 template <typename VT>
 void init_gs_structs(
-    COOMtxData<VT> *coo_mat,
+    COOMtxData<double> *coo_mat,
     SparseMtxFormat<VT> *sparse_mat
 ){
-    COOMtxData<VT> *coo_L = new COOMtxData<VT>;
-    COOMtxData<VT> *coo_U = new COOMtxData<VT>;
+    COOMtxData<double> *coo_L = new COOMtxData<double>;
+    COOMtxData<double> *coo_U = new COOMtxData<double>;
 
-    split_L_U<VT>(coo_mat, coo_L, coo_U);
+    split_L_U<double>(coo_mat, coo_L, coo_U);
 
 #ifdef USE_USPMV
     // Only used for GS kernel
     // TODO: Find a better solution than this crap
-    MtxData<VT, int> *mtx_L = new MtxData<VT, int>;
+    MtxData<double, int> *mtx_L = new MtxData<double, int>;
     mtx_L->n_rows = coo_L->n_rows;
     mtx_L->n_cols = coo_L->n_cols;
     mtx_L->nnz = coo_L->nnz;
@@ -123,9 +123,9 @@ void init_gs_structs(
     mtx_L->I = coo_L->I;
     mtx_L->J = coo_L->J;
     mtx_L->values = coo_L->values;
-    convert_to_scs<VT, int>(mtx_L, CHUNK_SIZE, SIGMA, sparse_mat->scs_L);
+    convert_to_scs<double, VT, int>(mtx_L, CHUNK_SIZE, SIGMA, sparse_mat->scs_L);
 
-    MtxData<VT, int> *mtx_U = new MtxData<VT, int>;
+    MtxData<double, int> *mtx_U = new MtxData<double, int>;
     mtx_U->n_rows = coo_U->n_rows;
     mtx_U->n_cols = coo_U->n_cols;
     mtx_U->nnz = coo_U->nnz;
@@ -134,7 +134,7 @@ void init_gs_structs(
     mtx_U->I = coo_U->I;
     mtx_U->J = coo_U->J;
     mtx_U->values = coo_U->values;
-    convert_to_scs<VT, int>(mtx_U, CHUNK_SIZE, SIGMA, sparse_mat->scs_U);
+    convert_to_scs<double, VT, int>(mtx_U, CHUNK_SIZE, SIGMA, sparse_mat->scs_U);
 #endif
 
     convert_to_crs(coo_L, sparse_mat->crs_L);

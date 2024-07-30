@@ -78,7 +78,7 @@ struct argType {
     double hp_percent;
 #endif
 
-    COOMtxData<VT> *coo_mat;
+    COOMtxData<double> *coo_mat;
     SparseMtxFormat<VT> *sparse_mat;
     Timers *timers;
 

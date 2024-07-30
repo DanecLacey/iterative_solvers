@@ -13,11 +13,12 @@
 #include "../../Ultimate-SpMV/code/interface.hpp"
 #endif
 
+template <typename VT>
 struct gmresArgs
 {
     double beta;
-    double *init_v;
-    double *V;
+    VT *init_v;
+    VT *V;
     double *Vy;
     double *H;
     double *H_tmp;
@@ -35,19 +36,19 @@ template <typename VT>
 void gmres_iteration_ref_cpu(
     SparseMtxFormat<VT> *sparse_mat,
     Timers *timers,
-    double *V,
+    VT *V,
     double *H,
     double *H_tmp,
     double *J,
     double *Q,
     double *Q_copy,
-    double *w,
-    double *w_perm,
+    VT *w,
+    VT *w_perm,
     double *R,
     double *g,
     double *g_copy,
-    double *b,
-    double *x,
+    VT *b,
+    VT *x,
     double beta,
     int n_rows,
     int restart_count,
@@ -77,7 +78,7 @@ void gmres_iteration_ref_cpu(
 #ifdef USE_USPMV
 
 #ifdef USE_AP
-    uspmv_omp_csr_ap_cpu<int>(
+    uspmv_omp_csr_ap_cpu<VT, int>(
         sparse_mat->scs_mat_hp->n_chunks,
         sparse_mat->scs_mat_hp->C,
         &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
@@ -503,13 +504,14 @@ void gmres_iteration_ref_cpu(
     timers->gmres_leastsq_wtime->end_stopwatch();
 }
 
+template <typename VT>
 void allocate_gmres_structs(
-    gmresArgs *gmres_args,
+    gmresArgs<VT> *gmres_args,
     int vec_size
 ){
     std::cout << "Allocating space for GMRES structs" << std::endl;
-    double *init_v = new double[vec_size];
-    double *V = new double[vec_size * (gmres_args->restart_length + 1)]; // (m x n)
+    VT *init_v = new VT[vec_size];
+    VT *V = new VT[vec_size * (gmres_args->restart_length + 1)]; // (m x n)
     double *Vy = new double[vec_size]; // (m x 1)
     double *H = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m) 
     double *H_tmp = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m)
@@ -534,15 +536,16 @@ void allocate_gmres_structs(
     gmres_args->restart_count = 0;
 }
 
+template <typename VT>
 void init_gmres_structs(
-    gmresArgs *gmres_args,
+    gmresArgs<VT> *gmres_args,
     double *r,
     int n_rows
 ){
     int restart_len = gmres_args->restart_length;
 
     gmres_args->beta = euclidean_vec_norm_cpu(r, n_rows);
-    scale(gmres_args->init_v, r, 1 / gmres_args->beta, n_rows);
+    scale_residual<VT>(gmres_args->init_v, r, 1 / gmres_args->beta, n_rows);
 
 #ifdef DEBUG_MODE
     std::cout << "Beta = " << gmres_args->beta << std::endl;
@@ -554,7 +557,7 @@ void init_gmres_structs(
 #endif
     
 
-    init<double>(gmres_args->V, 0.0, n_rows * (restart_len+1));
+    init<VT>(gmres_args->V, 0.0, n_rows * (restart_len+1));
 
     // Give v0 to first row of V
     #pragma omp parallel for
@@ -631,19 +634,20 @@ void init_gmres_timers(Timers *timers){
     timers->gmres_get_x_wtime = gmres_get_x_wtime;
 }
 
+template <typename VT>
 void gmres_get_x(
     double *R,
     double *g,
-    double *x,
-    double *x_0,
-    double *V,
+    VT *x,
+    VT *x_0,
+    VT *V,
     double *Vy,
     int n_rows,
     int restart_count,
     int iter_count,
     int restart_len
 ){
-    std::vector<double> y(restart_len, 0.0);
+    std::vector<VT> y(restart_len, 0.0);
 
     double diag_elem = 0.0;
     double sum;

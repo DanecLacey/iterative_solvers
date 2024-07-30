@@ -46,17 +46,17 @@ void jacobi_iteration_ref_cpu(
 template <typename VT>
 void jacobi_iteration_sep_cpu(
     SparseMtxFormat<VT> *sparse_mat,
-    double *D,
-    double *b,
-    double *x_old,
-    double *x_old_perm,
-    double *x_new,
-    double *x_new_perm,
+    VT *D,
+    VT *b,
+    VT *x_old,
+    VT *x_old_perm,
+    VT *x_new,
+    VT *x_new_perm,
     int n_rows
 ){
 #ifdef USE_USPMV
 #ifdef USE_AP
-    uspmv_omp_scs_ap_cpu<int>(
+    uspmv_omp_scs_ap_cpu<VT, int>(
         sparse_mat->scs_mat_hp->n_chunks,
         sparse_mat->scs_mat_hp->C,
         &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
@@ -92,7 +92,7 @@ void jacobi_iteration_sep_cpu(
     spmv_crs_cpu<VT>(x_new, sparse_mat->crs_mat, x_old);
 #endif
     // account for diagonal element in sum, RHS, and division 
-    jacobi_normalize_x_cpu(x_new, x_old, D, b, n_rows);
+    jacobi_normalize_x_cpu<VT>(x_new, x_old, D, b, n_rows);
 }
 
 #ifdef __CUDACC__
