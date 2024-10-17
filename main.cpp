@@ -27,6 +27,70 @@
 #define xstr(s) str(s)
 #define str(s) #s
 
+template <size_t Length>
+struct fixed_string {
+    char _chars[Length+1] = {}; // +1 for null terminator
+};
+
+#ifdef USE_USPMV
+template <typename VT>
+void convert_ap_scs_structs(
+    MtxData<double, int> *mtx_mat_dp,
+    MtxData<float, int> *mtx_mat_sp,
+#ifdef HAVE_HALF_MATH
+    MtxData<_Float16, int> *mtx_mat_hp,
+#endif
+    argType<VT> *args,
+    char *ap_value_type
+){
+    if(ap_value_type == "ap[dp_sp]"){
+        std::cout << "Converting DP struct" << std::endl;
+        convert_to_scs<double, double, int>(mtx_mat_dp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_dp); 
+        std::cout << "Converting SP struct" << std::endl;
+        convert_to_scs<float, float, int>(mtx_mat_sp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_sp, &(args->sparse_mat->scs_mat_dp->old_to_new_idx)[0]); 
+        // Empty struct
+#ifdef HAVE_HALF_MATH
+        std::cout << "Converting HP struct" << std::endl;
+        convert_to_scs<_Float16, _Float16, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
+#endif
+    }
+    else if(ap_value_type == "ap[dp_hp]"){
+        std::cout << "Converting DP struct" << std::endl;
+        convert_to_scs<double, double, int>(mtx_mat_dp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_dp); 
+#ifdef HAVE_HALF_MATH
+        std::cout << "Converting HP struct" << std::endl;
+        convert_to_scs<_Float16, _Float16, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp, &(args->sparse_mat->scs_mat_dp->old_to_new_idx)[0]); 
+#endif
+        // Empty struct
+        std::cout << "Converting SP struct" << std::endl;
+        convert_to_scs<float, float, int>(mtx_mat_sp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_sp); 
+    }
+    else if(ap_value_type == "ap[sp_hp]"){
+        std::cout << "Converting SP struct" << std::endl;
+        convert_to_scs<float, float, int>(mtx_mat_sp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_sp); 
+
+#ifdef HAVE_HALF_MATH
+        std::cout << "Converting HP struct" << std::endl;
+        convert_to_scs<_Float16, _Float16, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp, &(args->sparse_mat->scs_mat_sp->old_to_new_idx)[0]); 
+#endif
+        // Empty struct
+        std::cout << "Converting DP struct" << std::endl;
+        convert_to_scs<double, double, int>(mtx_mat_dp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_dp); 
+    }
+    else if(ap_value_type == "ap[dp_sp_hp]"){
+        std::cout << "Converting DP struct" << std::endl;
+        convert_to_scs<double, double, int>(mtx_mat_dp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_dp); 
+        std::cout << "Converting SP struct" << std::endl;
+        convert_to_scs<float, float, int>(mtx_mat_sp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_sp, &(args->sparse_mat->scs_mat_dp->old_to_new_idx)[0]); 
+
+#ifdef HAVE_HALF_MATH
+        std::cout << "Converting HP struct" << std::endl;
+        convert_to_scs<_Float16, _Float16, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp, &(args->sparse_mat->scs_mat_dp->old_to_new_idx)[0]); 
+#endif
+    }
+}
+#endif
+
 // TODO: MPI preprocessing will go here
 template <typename VT>
 void preprocessing(
@@ -86,28 +150,107 @@ void preprocessing(
     args->allocate_gpu_general_structs();
 #endif
 
-    // Allocate structs specific to each solver
-    solver->allocate_cpu_solver_structs(args->sparse_mat, args->coo_mat, args->vec_size);
-
 #ifdef USE_USPMV
 #ifdef USE_AP
     // Convert MTX mat to Sell-C-Simga in the case of AP
-    MtxData<double, int> *mtx_mat_hp = new MtxData<double, int>;
-    MtxData<float, int> *mtx_mat_lp = new MtxData<float, int>;
+    MtxData<double, int> *mtx_mat_dp = new MtxData<double, int>;
+    MtxData<float, int> *mtx_mat_sp = new MtxData<float, int>;
+#ifdef HAVE_HALF_MATH
+    MtxData<_Float16, int> *mtx_mat_hp = new MtxData<_Float16, int>;
+#endif
 
-    seperate_lp_from_hp<double, int>(mtx_mat, mtx_mat_hp, mtx_mat_lp, &largest_row_elems, &largest_col_elems, AP_THRESHOLD, true);
-    args->lp_percent = mtx_mat_lp->nnz / (double)mtx_mat->nnz;
+    partition_precisions<double, int>(
+        mtx_mat, 
+        mtx_mat_dp, 
+        mtx_mat_sp, 
+#ifdef HAVE_HALF_MATH
+        mtx_mat_hp, 
+#endif
+        &largest_row_elems, 
+        &largest_col_elems, 
+        AP_THRESHOLD_1,
+        AP_THRESHOLD_2,
+        AP_VALUE_TYPE,
+        true
+    );
+
+    args->dp_percent = mtx_mat_dp->nnz / (double)mtx_mat->nnz;
+    args->sp_percent = mtx_mat_sp->nnz / (double)mtx_mat->nnz;
+#ifdef HAVE_HALF_MATH
     args->hp_percent = mtx_mat_hp->nnz / (double)mtx_mat->nnz;
+#endif
 
-    std::cout << "Converting HP struct" << std::endl;
-    convert_to_scs<double, double, int>(mtx_mat_hp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_hp); 
-    std::cout << "Converting LP struct" << std::endl;
-    convert_to_scs<float, float, int>(mtx_mat_lp, CHUNK_SIZE, SIGMA, args->sparse_mat->scs_mat_lp, &(args->sparse_mat->scs_mat_hp->old_to_new_idx)[0]); 
+    convert_ap_scs_structs<VT>(
+        mtx_mat_dp,
+        mtx_mat_sp,
+#ifdef HAVE_HALF_MATH
+        mtx_mat_hp,
+#endif
+        args,
+        AP_VALUE_TYPE
+    );
+
 #endif
 #endif
 
-    // Just convenient to have a CRS copy too
-    convert_to_crs<VT>(args->coo_mat, args->sparse_mat->crs_mat);
+    // Allocate structs specific to each solver
+    solver->allocate_cpu_solver_structs(
+#ifdef USE_AP
+        mtx_mat_dp,
+        mtx_mat_sp,
+#ifdef HAVE_HALF_MATH
+        mtx_mat_hp,
+#endif
+        AP_VALUE_TYPE,
+#endif
+        args->sparse_mat, 
+        args->coo_mat, 
+        args->vec_size
+    );
+
+//     // Just convenient to have a CRS copy too
+    convert_to_crs<double, VT>(
+        &args->coo_mat->n_rows,
+        &args->coo_mat->n_cols,
+        &args->coo_mat->nnz,
+        &args->coo_mat->I,
+        &args->coo_mat->J,
+        &args->coo_mat->values, 
+        args->sparse_mat->crs_mat
+    );
+#ifdef USE_USPMV
+#ifdef USE_AP
+    convert_to_crs<double, double>(
+        &args->coo_mat->n_rows,
+        &args->coo_mat->n_cols,
+        &args->coo_mat->nnz,
+        &args->coo_mat->I,
+        &args->coo_mat->J,
+        &args->coo_mat->values, 
+        args->sparse_mat->crs_mat_dp
+    );
+    convert_to_crs<double, float>(
+        &args->coo_mat->n_rows,
+        &args->coo_mat->n_cols,
+        &args->coo_mat->nnz,
+        &args->coo_mat->I,
+        &args->coo_mat->J,
+        &args->coo_mat->values, 
+        args->sparse_mat->crs_mat_sp
+    );
+#ifdef HAVE_HALF_MATH
+    convert_to_crs<double, _Float16>(
+        &args->coo_mat->n_rows,
+        &args->coo_mat->n_cols,
+        &args->coo_mat->nnz,
+        &args->coo_mat->I,
+        &args->coo_mat->J,
+        &args->coo_mat->values, 
+        args->sparse_mat->crs_mat_hp
+    );
+#endif
+#endif
+#endif
 
 #ifdef __CUDACC__
     gpu_allocate_copy_sparse_mat(args);
@@ -124,16 +267,41 @@ void preprocessing(
     generate_vector<VT>(solver->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
     scale_vector<VT>(solver->x_old, &largest_row_elems, args->vec_size);
 
+    // TODO: Ugly, wrap-up in a subroutine
+#ifdef USE_AP
+    // Copy data to AP structs
+    std::string working_precision = xstr(WORKING_PRECISION);
+    if(working_precision == "double"){
+        for(int i = 0; i < args->vec_size; ++i){
+            solver->x_old_dp[i] = solver->x_old[i];
+        }
+    }
+    else if(working_precision == "float"){
+        for(int i = 0; i < args->vec_size; ++i){
+            solver->x_old_sp[i] = solver->x_old[i];
+        }
+    }
+#ifdef HAVE_HALF_MATH
+    else if(working_precision == "half"){
+        for(int i = 0; i < args->vec_size; ++i){
+            solver->x_old_hp[i] = solver->x_old[i];
+        }
+    }
+#endif
+#endif
+
+
+
 #ifdef __CUDACC__
     gpu_copy_structs(args);
 #endif
 
-    solver->init_residual(args->sparse_mat, args->coo_mat->n_cols);
+    solver->init_residual(args->sparse_mat, args->coo_mat->n_cols, args->vec_size);
 
 #ifdef DEBUG_MODE
     printf("initial residual = [");
     for(int i = 0; i < args->coo_mat->n_cols; ++i){
-        std::cout <<solver->r[i] << ",";
+        std::cout << static_cast<double>(solver->r[i]) << ",";
     }
     printf("]\n");
 #endif
@@ -173,12 +341,19 @@ void run_solver(
     args->timers->total_wtime = total_wtime;
     args->timers->total_wtime->start_stopwatch();
 
-    assign_cli_inputs<VT>(args, argc, argv, &matrix_file_name);
+    assign_cli_inputs<VT>(
+        args, 
+        argc, 
+        argv,
+#ifdef USE_AP
+        AP_VALUE_TYPE,
+#endif 
+        &matrix_file_name
+    );
 
     Solver<VT> *solver = new Solver<VT>(args->solver_type, args->preconditioner_type);
     gmresArgs<VT> *gmres_args = new gmresArgs<VT>;
     solver->gmres_args = gmres_args;
-
 
 #ifdef USE_SCAMAC
         std::cout << "Generating Matrix" << std::endl;
@@ -196,7 +371,7 @@ void run_solver(
         solver->gmres_args->restart_length = loop_params->gmres_restart_len;
         args->coo_mat = coo_mat;
 
-    #ifdef __CUDACC__
+#ifdef __CUDACC__
         double *d_x_star = new double;
         double *d_x_new = new double;
         double *d_x_old = new double;
@@ -220,31 +395,85 @@ void run_solver(
         solver->d_D = d_D;
         solver->d_b = d_b;
         args->d_normed_residuals = d_normed_residuals;
-    #endif
+#endif
 
-    #ifdef USE_USPMV
+#ifdef USE_USPMV
         ScsData<VT, int> *scs_mat = new ScsData<VT, int>;
         args->sparse_mat->scs_mat = scs_mat;
-    #ifdef USE_AP
-        ScsData<double, int> *scs_mat_hp = new ScsData<double, int>;
-        ScsData<float, int> *scs_mat_lp = new ScsData<float, int>;
+#ifdef USE_AP
+        ScsData<double, int> *scs_mat_dp = new ScsData<double, int>;
+        ScsData<float, int> *scs_mat_sp = new ScsData<float, int>;
+#ifdef HAVE_HALF_MATH
+        ScsData<_Float16, int> *scs_mat_hp = new ScsData<_Float16, int>;
+#endif
 
+        args->sparse_mat->scs_mat_dp = scs_mat_dp;
+        args->sparse_mat->scs_mat_sp = scs_mat_sp;
+#ifdef HAVE_HALF_MATH
         args->sparse_mat->scs_mat_hp = scs_mat_hp;
-        args->sparse_mat->scs_mat_lp = scs_mat_lp;
-    #endif
+#endif
+
+#endif
         ScsData<VT, int> *scs_L = new ScsData<VT, int>;
         ScsData<VT, int> *scs_U = new ScsData<VT, int>;
         
         args->sparse_mat->scs_L = scs_L;
         args->sparse_mat->scs_U = scs_U;
-    #endif
 
+#ifdef USE_AP
+        ScsData<double, int> *scs_L_dp = new ScsData<double, int>;
+        ScsData<double, int> *scs_U_dp = new ScsData<double, int>;
+        ScsData<float, int> *scs_L_sp = new ScsData<float, int>;
+        ScsData<float, int> *scs_U_sp = new ScsData<float, int>;
+        
+        args->sparse_mat->scs_L_dp = scs_L_dp;
+        args->sparse_mat->scs_U_dp = scs_U_dp;
+        args->sparse_mat->scs_L_sp = scs_L_sp;
+        args->sparse_mat->scs_U_sp = scs_U_sp;
+#ifdef HAVE_HALF_MATH
+        ScsData<_Float16, int> *scs_L_hp = new ScsData<_Float16, int>;
+        ScsData<_Float16, int> *scs_U_hp = new ScsData<_Float16, int>;
+        
+        args->sparse_mat->scs_L_hp = scs_L_hp;
+        args->sparse_mat->scs_U_hp = scs_U_hp;
+#endif
+
+#endif
+
+#endif
+
+        // TODO: Put this somewhere other than main routine
         CRSMtxData<VT> *crs_mat = new CRSMtxData<VT>;
         CRSMtxData<VT> *crs_L = new CRSMtxData<VT>;
         CRSMtxData<VT> *crs_U = new CRSMtxData<VT>;
         args->sparse_mat->crs_mat = crs_mat;
         args->sparse_mat->crs_L = crs_L;
         args->sparse_mat->crs_U = crs_U;
+#ifdef USE_USPMV
+#ifdef USE_AP
+        CRSMtxData<double> *crs_mat_dp = new CRSMtxData<double>;
+        CRSMtxData<double> *crs_L_dp =   new CRSMtxData<double>;
+        CRSMtxData<double> *crs_U_dp =   new CRSMtxData<double>;
+        args->sparse_mat->crs_mat_dp = crs_mat_dp;
+        args->sparse_mat->crs_L_dp =   crs_L_dp;
+        args->sparse_mat->crs_U_dp =   crs_U_dp;
+        CRSMtxData<float> *crs_mat_sp = new CRSMtxData<float>;
+        CRSMtxData<float> *crs_L_sp =   new CRSMtxData<float>;
+        CRSMtxData<float> *crs_U_sp =   new CRSMtxData<float>;
+        args->sparse_mat->crs_mat_sp = crs_mat_sp;
+        args->sparse_mat->crs_L_sp =   crs_L_sp;
+        args->sparse_mat->crs_U_sp =   crs_U_sp;
+#ifdef HAVE_HALF_MATH
+        CRSMtxData<_Float16> *crs_mat_hp = new CRSMtxData<_Float16>;
+        CRSMtxData<_Float16> *crs_L_hp =   new CRSMtxData<_Float16>;
+        CRSMtxData<_Float16> *crs_U_hp =   new CRSMtxData<_Float16>;
+        args->sparse_mat->crs_mat_hp = crs_mat_hp;
+        args->sparse_mat->crs_L_hp =   crs_L_hp;
+        args->sparse_mat->crs_U_hp =   crs_U_hp;
+#endif
+#endif
+#endif
+
 
         preprocessing<VT>(args, solver);
 
@@ -252,7 +481,7 @@ void run_solver(
 
         postprocessing<VT>(args, solver);
 
-        #ifdef USE_USPMV
+#ifdef USE_USPMV
     delete scs_mat;
     delete scs_L;
     delete scs_U;
@@ -334,13 +563,18 @@ int main(int argc, char *argv[]){
     };
 ////////////////////////////////////////////////
 
-    std::string precision = xstr(PRECISION);
-    if(precision == "double")
+    std::string working_precision = xstr(WORKING_PRECISION);
+    if(working_precision == "double")
         run_solver<double>(argc, argv, &flags, &loop_params);
-    else if(precision == "float")
+    else if(working_precision == "float")
         run_solver<float>(argc, argv, &flags, &loop_params);
+    else if(working_precision == "half"){
+#ifdef HAVE_HALF_MATH
+        run_solver<_Float16>(argc, argv, &flags, &loop_params);
+#endif
+    }
     else{
-        std::cout << "PRECISION \"" << precision << "\" in config.mk not recognized" << std::endl;
+        std::cout << "PRECISION \"" << working_precision << "\" in config.mk not recognized" << std::endl;
     }
 
 #ifdef USE_LIKWID

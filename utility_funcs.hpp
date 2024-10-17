@@ -28,6 +28,9 @@
 #include "sparse_matrix.hpp"
 #include "structs.hpp"
 
+#define xstr(s) str(s)
+#define str(s) #s
+
 template <typename VT>
 void init(
     VT *vec,
@@ -228,11 +231,32 @@ void compare_with_direct(
 #endif
 }
 
-template <typename VT>
+template <typename VT, typename DT>
 void split_L_U(
-    COOMtxData<VT> *full_coo_mtx,
-    COOMtxData<VT> *L_coo_mtx,
-    COOMtxData<VT> *U_coo_mtx
+    bool *full_coo_mtx_is_sorted,
+    bool *full_coo_mtx_is_symmetric,
+    long *full_coo_mtx_n_cols,
+    long *full_coo_mtx_n_rows,
+    long *full_coo_mtx_nnz,
+    std::vector<int> *full_coo_mtx_I,
+    std::vector<int> *full_coo_mtx_J,
+    std::vector<VT> *full_coo_mtx_values,
+    bool *L_coo_mtx_is_sorted,
+    bool *L_coo_mtx_is_symmetric,
+    long *L_coo_mtx_n_cols,
+    long *L_coo_mtx_n_rows,
+    long *L_coo_mtx_nnz,
+    std::vector<int> *L_coo_mtx_I,
+    std::vector<int> *L_coo_mtx_J,
+    std::vector<DT> *L_coo_mtx_values,
+    bool *U_coo_mtx_is_sorted,
+    bool *U_coo_mtx_is_symmetric,
+    long *U_coo_mtx_n_cols,
+    long *U_coo_mtx_n_rows,
+    long *U_coo_mtx_nnz,
+    std::vector<int> *U_coo_mtx_I,
+    std::vector<int> *U_coo_mtx_J,
+    std::vector<DT> *U_coo_mtx_values
 ){
     bool explitit_zero_warning_flag = false;
     int L_coo_mtx_count = 0;
@@ -240,39 +264,39 @@ void split_L_U(
     int D_coo_vec_count = 0;
 
     // Force same dimensions for consistency
-    U_coo_mtx->n_rows = full_coo_mtx->n_rows;
-    U_coo_mtx->n_cols = full_coo_mtx->n_cols;
-    U_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
-    U_coo_mtx->is_symmetric = false;
-    L_coo_mtx->n_rows = full_coo_mtx->n_rows;
-    L_coo_mtx->n_cols = full_coo_mtx->n_cols;
-    L_coo_mtx->is_sorted = full_coo_mtx->is_sorted;
-    L_coo_mtx->is_symmetric = false;
+    *U_coo_mtx_n_rows = *full_coo_mtx_n_rows;
+    *U_coo_mtx_n_cols = *full_coo_mtx_n_cols;
+    *U_coo_mtx_is_sorted = *full_coo_mtx_is_sorted;
+    *U_coo_mtx_is_symmetric = false;
+    *L_coo_mtx_n_rows = *full_coo_mtx_n_rows;
+    *L_coo_mtx_n_cols = *full_coo_mtx_n_cols;
+    *L_coo_mtx_is_sorted = *full_coo_mtx_is_sorted;
+    *L_coo_mtx_is_symmetric = false;
 
-    for(int nz_idx = 0; nz_idx < full_coo_mtx->nnz; ++nz_idx){
+    for(int nz_idx = 0; nz_idx < *full_coo_mtx_nnz; ++nz_idx){
         // If column and row less than i, this nz is in the L matrix
-        if(full_coo_mtx->J[nz_idx] < full_coo_mtx->I[nz_idx]){
+        if((*full_coo_mtx_J)[nz_idx] < (*full_coo_mtx_I)[nz_idx]){
             // Copy element to lower matrix
-            L_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
-            L_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
-            L_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
-            ++L_coo_mtx->nnz;
+            L_coo_mtx_I->push_back((*full_coo_mtx_I)[nz_idx]);
+            L_coo_mtx_J->push_back((*full_coo_mtx_J)[nz_idx]);
+            L_coo_mtx_values->push_back((*full_coo_mtx_values)[nz_idx]);
+            ++(*L_coo_mtx_nnz);
             // std::cout << full_coo_mtx->values[nz_idx] << " sent to lower matrix" << std::endl;
         }
-        else if(full_coo_mtx->J[nz_idx] > full_coo_mtx->I[nz_idx]){
+        else if((*full_coo_mtx_J)[nz_idx] > (*full_coo_mtx_I)[nz_idx]){
             // Copy element to upper matrix
-            U_coo_mtx->I.push_back(full_coo_mtx->I[nz_idx]);
-            U_coo_mtx->J.push_back(full_coo_mtx->J[nz_idx]);
-            U_coo_mtx->values.push_back(full_coo_mtx->values[nz_idx]);
-            ++U_coo_mtx->nnz;
+            U_coo_mtx_I->push_back((*full_coo_mtx_I)[nz_idx]);
+            U_coo_mtx_J->push_back((*full_coo_mtx_J)[nz_idx]);
+            U_coo_mtx_values->push_back((*full_coo_mtx_values)[nz_idx]);
+            ++(*U_coo_mtx_nnz);
             // std::cout << full_coo_mtx->values[nz_idx] << " sent to upper matrix" << std::endl;
         }
-        else if(full_coo_mtx->I[nz_idx] == full_coo_mtx->J[nz_idx]){
+        else if((*full_coo_mtx_I)[nz_idx] == (*full_coo_mtx_J)[nz_idx]){
         //     // Copy element to vector representing diagonal matrix
         //     // NOTE: Don't need push_back because we know the size
-            if(abs(full_coo_mtx->values[nz_idx]) < 1e-15 && !explitit_zero_warning_flag){ // NOTE: error tolerance too tight?
+            if(std::abs(static_cast<double>((*full_coo_mtx_values)[nz_idx])) < 1e-15 && !explitit_zero_warning_flag){ // NOTE: error tolerance too tight?
                 printf("WARNING: split_upper_lower_diagonal: explicit zero detected on diagonal at nz_idx %i.\n"
-                        "row: %i, col: %i, val: %f.\n", nz_idx, full_coo_mtx->I[nz_idx], full_coo_mtx->J[nz_idx], full_coo_mtx->values[nz_idx]);
+                        "row: %i, col: %i, val: %f.\n", nz_idx, (*full_coo_mtx_I)[nz_idx], (*full_coo_mtx_J)[nz_idx], (*full_coo_mtx_values)[nz_idx]);
         //         explitit_zero_warning_flag = true;
             }
         //     (*D_coo_vec)[D_coo_vec_count] = full_coo_mtx->values[nz_idx];
@@ -286,23 +310,27 @@ void split_L_U(
 
     // Sanity checks; TODO: Make optional
     // All elements from full_coo_mtx need to be accounted for
-    int copied_elems_count = L_coo_mtx->nnz + U_coo_mtx->nnz + D_coo_vec_count; 
-    if(copied_elems_count != full_coo_mtx->nnz){
-        printf("ERROR: split_upper_lower_diagonal: only %i out of %i elements were copied from full_coo_mtx.\n", copied_elems_count, full_coo_mtx->nnz);
+    int copied_elems_count = *L_coo_mtx_nnz + *U_coo_mtx_nnz + D_coo_vec_count; 
+    if(copied_elems_count != *full_coo_mtx_nnz){
+        printf("ERROR: split_upper_lower_diagonal: only %i out of %i elements were copied from full_coo_mtx.\n", copied_elems_count, *full_coo_mtx_nnz);
         exit(1);
     }
-
 }
 
-template<typename VT>
+template<typename COOT, typename VT>
 void convert_to_crs(
-    COOMtxData<double> *coo_mat,
+    long *coo_mat_n_rows,
+    long *coo_mat_n_cols,
+    long *coo_mat_nnz,
+    std::vector<int> *coo_mat_I,
+    std::vector<int> *coo_mat_J,
+    std::vector<COOT> *coo_mat_values,
     CRSMtxData<VT> *crs_mat
     )
 {
-    crs_mat->n_rows = coo_mat->n_rows;
-    crs_mat->n_cols = coo_mat->n_cols;
-    crs_mat->nnz = coo_mat->nnz;
+    crs_mat->n_rows = *coo_mat_n_rows;
+    crs_mat->n_cols = *coo_mat_n_cols;
+    crs_mat->nnz = *coo_mat_nnz;
 
     crs_mat->row_ptr = new int[crs_mat->n_rows+1];
     int *nnzPerRow = new int[crs_mat->n_rows];
@@ -312,8 +340,8 @@ void convert_to_crs(
 
     for(int idx = 0; idx < crs_mat->nnz; ++idx)
     {
-        crs_mat->col[idx] = coo_mat->J[idx];
-        crs_mat->val[idx] = coo_mat->values[idx];
+        crs_mat->col[idx] = (*coo_mat_J)[idx];
+        crs_mat->val[idx] = (*coo_mat_values)[idx];
     }
 
     for(int i = 0; i < crs_mat->n_rows; ++i)
@@ -324,7 +352,7 @@ void convert_to_crs(
     //count nnz per row
     for(int i=0; i < crs_mat->nnz; ++i)
     {
-        ++nnzPerRow[coo_mat->I[i]];
+        ++nnzPerRow[(*coo_mat_I)[i]];
     }
 
     crs_mat->row_ptr[0] = 0;
@@ -347,21 +375,68 @@ void record_residual_norm(
     argType<VT> *args,
     Flags *flags,
     SparseMtxFormat<VT> *sparse_mat,
-    double *residual_norm,
     VT *r,
     VT *x,
     VT *b,
     VT *x_new,
     VT *tmp,
-    VT *tmp_perm
+    VT *tmp_perm,
+#ifdef USE_AP
+    double *x_dp,
+    double *x_new_dp,
+    double *tmp_dp,
+    double *tmp_perm_dp,
+    float *x_sp,
+    float *x_new_sp,
+    float *tmp_sp,
+    float *tmp_perm_sp,
+#ifdef HAVE_HALF_MATH
+    _Float16 *x_hp,
+    _Float16 *x_new_hp,
+    _Float16 *tmp_hp,
+    _Float16 *tmp_perm_hp,
+#endif
+#endif
+    double *residual_norm
 ){
     if(args->solver_type == "jacobi"){
-        calc_residual_cpu<VT>(sparse_mat, x_new, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
-        *residual_norm = infty_vec_norm_cpu(r, args->coo_mat->n_cols);
+#ifdef USE_AP
+        std::string working_precision = xstr(WORKING_PRECISION);
+        if(working_precision == "double"){
+            calc_residual_cpu<VT, double>(sparse_mat, x_new_dp, b, r, tmp_dp, tmp_perm_dp, args->coo_mat->n_cols);
+        }
+        else if(working_precision == "float"){
+            calc_residual_cpu<VT, float>(sparse_mat, x_new_sp, b, r, tmp_sp, tmp_perm_sp, args->coo_mat->n_cols);
+        }
+        else if(working_precision == "half"){
+#ifdef HAVE_HALF_MATH
+            calc_residual_cpu<VT, _Float16>(sparse_mat, x_new_hp, b, r, tmp_hp, tmp_perm_hp, args->coo_mat->n_cols);
+#endif
+        }
+#else
+        calc_residual_cpu<VT, VT>(sparse_mat, x_new, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
+#endif
+        *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
     }
     else if(args->solver_type == "gauss-seidel"){
-        calc_residual_cpu<VT>(sparse_mat, x, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
-        *residual_norm = infty_vec_norm_cpu(r, args->coo_mat->n_cols);
+#ifdef USE_AP
+        std::string working_precision = xstr(WORKING_PRECISION);
+        if(working_precision == "double"){
+            calc_residual_cpu<VT, double>(sparse_mat, x_dp, b, r, tmp_dp, tmp_perm_dp, args->coo_mat->n_cols);
+        }
+        else if(working_precision == "float"){
+            calc_residual_cpu<VT, float>(sparse_mat, x_sp, b, r, tmp_sp, tmp_perm_sp, args->coo_mat->n_cols);
+        }
+        else if(working_precision == "half"){
+#ifdef HAVE_HALF_MATH
+            calc_residual_cpu<VT, _Float16>(sparse_mat, x_hp, b, r, tmp_hp, tmp_perm_hp, args->coo_mat->n_cols);
+#endif
+        }
+
+#else
+        calc_residual_cpu<VT, VT>(sparse_mat, x, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
+#endif
+        *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
     }
     else if(args->solver_type == "gmres"){
         // NOTE: While not needed for GMRES in theory, it is helpful to compare

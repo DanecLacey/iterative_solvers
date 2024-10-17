@@ -8,6 +8,9 @@
 #include "../../Ultimate-SpMV/code/interface.hpp"
 #endif
 
+#define xstr(s) str(s)
+#define str(s) #s
+
 #ifdef __CUDACC__
 __global__
 void jacobi_normalize_x_gpu(
@@ -35,12 +38,12 @@ void jacobi_normalize_x_gpu(
 #endif
 
 
-template <typename VT>
+template <typename VT, typename DT>
 void jacobi_normalize_x_cpu(
     VT *x_new,
     const VT *x_old,
-    const VT *D,
-    const VT *rhs,
+    const DT *D,
+    const DT *rhs,
     int n_rows
 ){
     VT adjusted_x;
@@ -50,7 +53,10 @@ void jacobi_normalize_x_cpu(
         adjusted_x = x_new[row_idx] - D[row_idx] * x_old[row_idx];
         x_new[row_idx] = (rhs[row_idx] - adjusted_x)/ D[row_idx];
 #ifdef DEBUG_MODE_FINE
-            std::cout << rhs[row_idx] << " - " << adjusted_x << " / " << D[row_idx] << " = " << x_new[row_idx] << " at idx: " << row_idx << std::endl; 
+            std::cout << static_cast<double>(rhs[row_idx]) << " - ";
+            std::cout << static_cast<double>(adjusted_x) << " / ";
+            std::cout << static_cast<double>(D[row_idx]) << " = ";
+            std::cout << static_cast<double>(x_new[row_idx]) << " at idx: " << row_idx << std::endl; 
 #endif
     }
 }
@@ -100,47 +106,106 @@ void jacobi_iteration_sep_cpu(
     VT *x_old_perm,
     VT *x_new,
     VT *x_new_perm,
+#ifdef USE_USPMV
+#ifdef USE_AP
+    // double *D_dp,
+    // double *b_dp,
+    double *x_old_dp,
+    double *x_old_perm_dp,
+    double *x_new_dp,
+    double *x_new_perm_dp,
+    // float *D_sp,
+    // float *b_sp,
+    float *x_old_sp,
+    float *x_old_perm_sp,
+    float *x_new_sp,
+    float *x_new_perm_sp,
+#ifdef HAVE_HALF_MATH
+    // _Float16 *D_hp,
+    // _Float16 *b_hp,
+    _Float16 *x_old_hp,
+    _Float16 *x_old_perm_hp,
+    _Float16 *x_new_hp,
+    _Float16 *x_new_perm_hp,
+#endif
+#endif
+#endif
     int n_rows
 ){
 #ifdef USE_USPMV
+    execute_uspmv<VT, int>(
+        &(sparse_mat->scs_mat->C),
+        &(sparse_mat->scs_mat->n_chunks),
+        sparse_mat->scs_mat->chunk_ptrs.data(),
+        sparse_mat->scs_mat->chunk_lengths.data(),
+        sparse_mat->scs_mat->col_idxs.data(),
+        sparse_mat->scs_mat->values.data(),
+        x_new,
+        x_old_perm,
 #ifdef USE_AP
-    uspmv_omp_scs_ap_cpu<VT, int>(
-        sparse_mat->scs_mat_hp->n_chunks,
-        sparse_mat->scs_mat_hp->C,
-        &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
-        &(sparse_mat->scs_mat_hp->col_idxs)[0],
-        &(sparse_mat->scs_mat_hp->values)[0],
-        x_old,
-        x_new_perm,
-        sparse_mat->scs_mat_lp->n_chunks,
-        sparse_mat->scs_mat_lp->C,
-        &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
-        &(sparse_mat->scs_mat_lp->col_idxs)[0],
-        &(sparse_mat->scs_mat_lp->values)[0]
+        &(sparse_mat->scs_mat_dp->C),
+        &(sparse_mat->scs_mat_dp->n_chunks),
+        sparse_mat->scs_mat_dp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_dp->chunk_lengths.data(),
+        sparse_mat->scs_mat_dp->col_idxs.data(),
+        sparse_mat->scs_mat_dp->values.data(),
+        x_new_dp,
+        x_old_perm_dp,
+        &(sparse_mat->scs_mat_sp->C),
+        &(sparse_mat->scs_mat_sp->n_chunks),
+        sparse_mat->scs_mat_sp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_sp->chunk_lengths.data(),
+        sparse_mat->scs_mat_sp->col_idxs.data(),
+        sparse_mat->scs_mat_sp->values.data(),
+        x_new_sp,
+        x_old_perm_sp,
+#ifdef HAVE_HALF_MATH
+        &(sparse_mat->scs_mat_hp->C),
+        &(sparse_mat->scs_mat_hp->n_chunks),
+        sparse_mat->scs_mat_hp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_hp->chunk_lengths.data(),
+        sparse_mat->scs_mat_hp->col_idxs.data(),
+        sparse_mat->scs_mat_hp->values.data(),
+        x_new_hp,
+        x_old_perm_hp,
+#endif
+#endif
+        AP_VALUE_TYPE
     );
-    apply_permutation(x_new, x_new_perm, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
+
+    #ifdef USE_AP
+            if(xstr(WORKING_PRECISION) == "double")
+                apply_permutation(x_old_dp, x_old_perm_dp, &(sparse_mat->scs_mat_dp->old_to_new_idx)[0], n_rows);
+            else if(xstr(WORKING_PRECISION) == "float")
+                apply_permutation(x_old_sp, x_old_perm_sp, &(sparse_mat->scs_mat_sp->old_to_new_idx)[0], n_rows);
+            else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+                apply_permutation(x_old_hp, x_old_perm_hp, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
+#endif
+            }
+    #else
+            apply_permutation(x_old, x_old_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+    #endif
 
 #else
-    uspmv_omp_scs_cpu<VT, int>(
-        sparse_mat->scs_mat->C,
-        sparse_mat->scs_mat->n_chunks,
-        &(sparse_mat->scs_mat->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat->chunk_lengths)[0],
-        &(sparse_mat->scs_mat->col_idxs)[0],
-        &(sparse_mat->scs_mat->values)[0],
-        x_old,
-        x_new_perm
-    );
-    apply_permutation(x_new, x_new_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+    spmv_crs_cpu<VT>(x_old, sparse_mat->crs_mat, x_new);
+#endif
 
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        jacobi_normalize_x_cpu<double, VT>(x_new_dp, x_old_dp, D, b, n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        jacobi_normalize_x_cpu<float, VT>(x_new_sp, x_old_sp, D, b, n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        jacobi_normalize_x_cpu<_Float16, VT>(x_new_hp, x_old_hp, D, b, n_rows);
 #endif
+    }
 #else
-    spmv_crs_cpu<VT>(x_new, sparse_mat->crs_mat, x_old);
-#endif
     // account for diagonal element in sum, RHS, and division 
     jacobi_normalize_x_cpu<VT>(x_new, x_old, D, b, n_rows);
+#endif
+
 }
 
 #ifdef __CUDACC__

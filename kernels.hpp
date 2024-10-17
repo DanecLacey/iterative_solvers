@@ -73,10 +73,10 @@ void sum_vectors(
     }
 }
 
-template <typename VT>
+template <typename VT, typename BT>
 void subtract_vectors_cpu(
     VT *result_vec,
-    const VT *vec1,
+    const BT *vec1,
     const VT *vec2,
     int N,
     double scale = 1.0
@@ -89,11 +89,11 @@ void subtract_vectors_cpu(
     }
 }
 
-template <typename VT>
+template <typename VT, typename FT>
 void subtract_residual_cpu(
     VT *residual_vec,
     const VT *vec1,
-    const VT *vec2,
+    const FT *vec2,
     int N,
     double scale = 1.0
 ){
@@ -164,7 +164,7 @@ void scale_residual(
         result_vec[i] = res[i] * scalar;
 #ifdef DEBUG_MODE_FINE
         std::cout << "scaling" << std::endl;
-        std::cout << result_vec[i] << " = " << res[i] << " * " << scalar << std::endl;
+        std::cout << static_cast<double>(result_vec[i]) << " = " << static_cast<double>(res[i]) << " * " << scalar << std::endl;
 #endif
     }
 }
@@ -396,7 +396,7 @@ void spmv_crs_cpu(
             for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
                 tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
     // #ifdef DEBUG_MODE_FINE
-    //             std::cout << crs_mat->val[nz_idx] << " * " << x[crs_mat->col[nz_idx]] << " = " << crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]] << " at idx: " << row_idx << std::endl; 
+                // std::cout << static_cast<double>(crs_mat->val[nz_idx]) << " * " << static_cast<double>(x[crs_mat->col[nz_idx]]) << " = " << static_cast<double>(crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]]) << " at idx: " << row_idx << std::endl; 
     // #endif
             }
             y[row_idx] = tmp;
@@ -447,11 +447,11 @@ void spmv_crs_gpu(
 }
 #endif
 
-template <typename VT>
+template <typename VT, typename MT>
 void spltsv_crs(
-    const CRSMtxData<VT> *crs_L,
+    const CRSMtxData<MT> *crs_L,
     VT *x,
-    const VT *D,
+    const MT *D,
     const VT *rhs
 )
 {
@@ -553,14 +553,16 @@ VT euclidean_vec_norm_cpu(
 }
 
 template <typename VT>
-VT infty_vec_norm_cpu(
+double infty_vec_norm_cpu(
     const VT *vec,
     int N
 ){
     double max_abs = 0.;
     double curr_abs;
     for (int i = 0; i < N; ++i){
-        curr_abs = std::abs(vec[i]);
+        // TODO:: Hmmm...
+        // curr_abs = std::abs(static_cast<double>(vec[i]));
+        curr_abs = (vec[i] >= 0) ? vec[i]  : -1*vec[i];
         if ( curr_abs > max_abs){
             max_abs = curr_abs; 
         }
@@ -662,17 +664,18 @@ void infty_vec_norm_gpu(
 
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
- template <typename VT>
+ template <typename VT, typename FT>
 void calc_residual_cpu(
     SparseMtxFormat<VT> *sparse_mat,
-    VT *x,
+    FT *x,
     VT *b,
     VT *r,
-    VT *tmp,
-    VT *tmp_perm,
+    FT *tmp,
+    FT *tmp_perm,
     int N
 ){
 
+//  Why do you want to use uspmv for this?
 #ifdef USE_USPMV
     // uspmv_omp_csr_cpu<double, int>(
     //     sparse_mat->scs_mat->C,
@@ -684,7 +687,7 @@ void calc_residual_cpu(
     //     x,
     //     tmp);
 
-    uspmv_omp_scs_cpu<VT, int>(
+    uspmv_scs_cpu<VT, FT, int>(
         sparse_mat->scs_mat->C,
         sparse_mat->scs_mat->n_chunks,
         &(sparse_mat->scs_mat->chunk_ptrs)[0],
@@ -694,12 +697,29 @@ void calc_residual_cpu(
         x,
         tmp_perm
     );
-    apply_permutation<VT, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
+    apply_permutation<FT, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
 
 #else
-    spmv_crs_cpu<VT>(tmp, sparse_mat->crs_mat, x);
+    spmv_crs_cpu<FT>(tmp, sparse_mat->crs_mat, x);
 #endif
-    subtract_residual_cpu(r, b, tmp, N);
+    subtract_residual_cpu<VT, FT>(r, b, tmp, N);
+
+#ifdef DEBUG_MODE
+    std::cout << "b check" << std::endl;
+    for(int i = 0; i < N; ++i){
+        std::cout << static_cast<double>(b[i]) << std::endl;
+    }
+
+    std::cout << "tmp check" << std::endl;
+    for(int i = 0; i < N; ++i){
+        std::cout << static_cast<double>(tmp[i]) << std::endl;
+    }
+
+    std::cout << "Residual check" << std::endl;
+    for(int i = 0; i < N; ++i){
+        std::cout << static_cast<double>(r[i]) << std::endl;
+    }
+#endif
 }
 
 #ifdef __CUDACC__

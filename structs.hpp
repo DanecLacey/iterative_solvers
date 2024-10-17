@@ -75,8 +75,11 @@ struct argType {
 #endif
 
 #ifdef USE_AP
-    double lp_percent;
+    double dp_percent;
+    double sp_percent;
+#ifdef HAVE_HALF_MATH
     double hp_percent;
+#endif
 #endif
 
     COOMtxData<double> *coo_mat;

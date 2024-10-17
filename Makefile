@@ -1,21 +1,25 @@
 include config.mk
 
 # apply solver parameters
-CXXFLAGS += -DVECTOR_LENGTH=$(VECTOR_LENGTH) -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN) -DPRECISION=$(PRECISION)
+CXXFLAGS += -DVECTOR_LENGTH=$(VECTOR_LENGTH) -DMAX_ITERS=$(MAX_ITERS) -DTOL=$(TOL) -DGMRES_RESTART_LEN=$(GMRES_RESTART_LEN) -DWORKING_PRECISION=$(WORKING_PRECISION)
 
 # compiler options
 ifeq ($(COMPILER),gcc)
   CXX       = g++
   OPT_LEVEL = -O3
   OPT_ARCH  = -march=native
-  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH) -std=$(CPP_VERSION)
+
+  ifeq ($(CPP_VERSION), c++23)
+    CXXFLAGS += -DHAVE_HALF_MATH
+  endif
 endif
 
 ifeq ($(COMPILER),icc)
   CXX       = icpc
   OPT_LEVEL = -O3
   OPT_ARCH  = -xhost
-  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH)
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(OPT_ARCH) -std=$(CPP_VERSION)
 endif
 
 ifeq ($(COMPILER),icx)
@@ -24,7 +28,21 @@ ifeq ($(COMPILER),icx)
   OPT_ARCH  = -xhost
   AVX512_fix= -Xclang -target-feature -Xclang +prefer-no-gather -xCORE-AVX512 -qopt-zmm-usage=high
 
-  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH)
+  CXXFLAGS += $(OPT_LEVEL) -Wall -fopenmp $(AVX512_fix) $(OPT_ARCH) -std=$(CPP_VERSION)
+  ifeq ($(CPP_VERSION), c++23)
+    CXXFLAGS += -DHAVE_HALF_MATH
+  endif
+endif
+
+ifeq ($(COMPILER),llvm)
+  CXX       = clang++
+  # MPICXX     = mpiicpc
+  OPT_LEVEL = -Ofast
+  OPT_ARCH  = -march=native
+  CXXFLAGS += $(OPT_LEVEL) -std=$(CPP_VERSION) -Wall -fopenmp $(OPT_ARCH)
+  ifeq ($(CPP_VERSION), c++23)
+  CXXFLAGS += -DHAVE_HALF_MATH 
+  endif
 endif
 
 ifeq ($(COMPILER),nvcc)
@@ -66,11 +84,19 @@ endif
 
 
 ifeq ($(USE_USPMV),1)
+  ifeq ($(USE_AP),0)
+    CXXFLAGS +=-DAP_VALUE_TYPE='"none"'
+  endif
   ifeq ($(USE_AP),1)
-    CXXFLAGS += -DUSE_AP -DAP_THRESHOLD=$(AP_THRESHOLD)
-    ifeq ($(PRECISION),float)
-      $(warning Adaptive Precision should not be used with PRECISION=float, switching to PRECISION=double)
-      PRECISION=double
+    CXXFLAGS += -DUSE_AP -DAP_THRESHOLD_1=$(AP_THRESHOLD_1) -DAP_THRESHOLD_2=$(AP_THRESHOLD_2) -DAP_VALUE_TYPE=$(AP_VALUE_TYPE)
+    ifeq ($(WORKING_PRECISION),double)
+      CXXFLAGS  += -DDOUBLE_PRECISION
+    endif
+    ifeq ($(WORKING_PRECISION),float)
+      CXXFLAGS  += -DSINGLE_PRECISION
+    endif
+    ifeq ($(WORKING_PRECISION),half)
+      CXXFLAGS  += -DHALF_PRECISION
     endif
   endif
   CXXFLAGS  += -DUSE_USPMV -DCHUNK_SIZE=$(CHUNK_SIZE) -DSIGMA=$(SIGMA)

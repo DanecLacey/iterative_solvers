@@ -103,75 +103,47 @@ void gmres_iteration_ref_cpu(
     // as that is an aspect of the implementation and not necessary for Sell-C-Sigma
     timers->gmres_spmv_wtime->start_stopwatch();
 #ifdef USE_USPMV
-
-#ifdef USE_AP
-    uspmv_omp_csr_ap_cpu<VT, int>(
-        sparse_mat->scs_mat_hp->n_chunks,
+    execute_spmv<VT, int>(
+        sparse_mat->scs_mat_dp->C,
+        sparse_mat->scs_mat_dp->n_chunks,
+        sparse_mat->scs_mat_dp->chunk_ptrs,
+        sparse_mat->scs_mat_dp->chunk_lengths,
+        sparse_mat->scs_mat_dp->col_idxs,
+        sparse_mat->scs_mat_dp->values,
+        sparse_mat->scs_mat_sp->C,
+        sparse_mat->scs_mat_sp->n_chunks,
+        sparse_mat->scs_mat_sp->chunk_ptrs,
+        sparse_mat->scs_mat_sp->chunk_lengths,
+        sparse_mat->scs_mat_sp->col_idxs,
+        sparse_mat->scs_mat_sp->values,
+#ifdef HAVE_HALF_MATH
         sparse_mat->scs_mat_hp->C,
-        &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
-        &(sparse_mat->scs_mat_hp->col_idxs)[0],
-        &(sparse_mat->scs_mat_hp->values)[0],
-        &V[iter_count*n_rows],
-        w,
-        sparse_mat->scs_mat_lp->n_chunks,
-        sparse_mat->scs_mat_lp->C,
-        &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
-        &(sparse_mat->scs_mat_lp->col_idxs)[0],
-        &(sparse_mat->scs_mat_lp->values)[0]
-    );
-    // uspmv_omp_scs_ap_cpu<int>(
-    //     sparse_mat->scs_mat_hp->n_chunks,
-    //     sparse_mat->scs_mat_hp->C,
-    //     &(sparse_mat->scs_mat_hp->chunk_ptrs)[0],
-    //     &(sparse_mat->scs_mat_hp->chunk_lengths)[0],
-    //     &(sparse_mat->scs_mat_hp->col_idxs)[0],
-    //     &(sparse_mat->scs_mat_hp->values)[0],
-    //     &V[iter_count*n_rows],
-    //     w_perm,
-    //     sparse_mat->scs_mat_lp->n_chunks,
-    //     sparse_mat->scs_mat_lp->C,
-    //     &(sparse_mat->scs_mat_lp->chunk_ptrs)[0],
-    //     &(sparse_mat->scs_mat_lp->chunk_lengths)[0],
-    //     &(sparse_mat->scs_mat_lp->col_idxs)[0],
-    //     &(sparse_mat->scs_mat_lp->values)[0]
-    // );
-
-    timers->gmres_spmv_wtime->end_stopwatch();
-
-    // apply_permutation(w, w_perm, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
-#else
-    uspmv_omp_csr_cpu<VT, int>(
-        sparse_mat->scs_mat->C,
-        sparse_mat->scs_mat->n_chunks,
-        &(sparse_mat->scs_mat->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat->chunk_lengths)[0],
-        &(sparse_mat->scs_mat->col_idxs)[0],
-        &(sparse_mat->scs_mat->values)[0],
-        &V[iter_count*n_rows],
-        w
-    );
-    // uspmv_omp_scs_cpu<VT, int>(
-    //     sparse_mat->scs_mat->C,
-    //     sparse_mat->scs_mat->n_chunks,
-    //     &(sparse_mat->scs_mat->chunk_ptrs)[0],
-    //     &(sparse_mat->scs_mat->chunk_lengths)[0],
-    //     &(sparse_mat->scs_mat->col_idxs)[0],
-    //     &(sparse_mat->scs_mat->values)[0],
-    //     &V[iter_count*n_rows],
-    //     w_perm
-    // );
-
-    timers->gmres_spmv_wtime->end_stopwatch();
-
-    // apply_permutation(w, w_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+        sparse_mat->scs_mat_hp->n_chunks,
+        sparse_mat->scs_mat_hp->chunk_ptrs,
+        sparse_mat->scs_mat_hp->chunk_lengths,
+        sparse_mat->scs_mat_hp->col_idxs,
+        sparse_mat->scs_mat_hp->values,
 #endif
-
+        &V[iter_count*n_rows],
+#ifdef USE_AP
+        w,
+        AP_VALUE_TYPE
 #else
-    spmv_crs_cpu<VT>(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
-
+        w
+#endif
+    );
+#else
+    spmv_crs_cpu<VT>(&V[iter_count*n_rows], sparse_mat->crs_mat, w);
+#endif
     timers->gmres_spmv_wtime->end_stopwatch();
+
+    // If using USPMV, then need to permute x
+#ifdef USE_USPMV
+#ifdef USE_AP
+    apply_permutation(w, w_perm, &(sparse_mat->scs_mat_dp->old_to_new_idx)[0], n_rows);
+#else
+    apply_permutation(w, w_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+#endif
 #endif
 
     timers->gmres_apply_preconditioner_wtime->start_stopwatch();
@@ -582,7 +554,7 @@ void init_gmres_structs(
     std::cout << "Beta = " << gmres_args->beta << std::endl;
     std::cout << "init_v = [";
         for(int i = 0; i < n_rows; ++i){
-            std::cout << gmres_args->init_v[i] << ", ";
+            std::cout << static_cast<double>(gmres_args->init_v[i]) << ", ";
         }
     std::cout << "]" << std::endl;
 #endif
@@ -730,7 +702,7 @@ void gmres_get_x(
 #ifdef DEBUG_MODE
     std::cout << "y_" << iter_count << " = [\n";
     for(int i = 0; i < restart_len; ++i){
-        std::cout << y[i]  << ", ";
+        std::cout << static_cast<double>(y[i])  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif

@@ -23,6 +23,9 @@ void assign_cli_inputs(
     argType<VT> *args, 
     int argc,
     char *argv[],
+#ifdef USE_AP
+    char* ap_value_type,
+#endif
     std::string *matrix_file_name
     )
 {
@@ -85,6 +88,23 @@ void assign_cli_inputs(
             std::cout << "ERROR: assign_cli_inputs: Arguement \"" << arg << "\" not recongnized." << std::endl;
         }
     }
+
+    // Sanity checks
+#ifdef USE_AP
+    if(ap_value_type == "ap[dp_sp_hp]" || ap_value_type == "ap[dp_hp]" || ap_value_type == "ap[sp_hp]"){
+#ifndef HAVE_HALF_MATH
+        printf("ERROR: You do not have access to _Float16 data type for half precision computations. Please check AP_VALUE_TYPE.\n");
+        exit(1);
+#endif
+    }
+#endif
+
+#ifdef USE_AP
+#ifndef USE_USPMV
+    printf("ERROR: You have selected USE_AP without linking to the USPMV library for adaptive precision support.\n");
+    exit(1);
+#endif
+#endif
 }
 
 void read_mtx(
@@ -285,7 +305,12 @@ void summary_output(
     }
     std::cout << "With the stopping criteria \"tol * || b-A*x_0 ||_infty\" is: " << loop_params.stopping_criteria << std::endl;
 #ifdef USE_AP
-    std::cout << "and AP splits: " << 100*args->lp_percent << "\% lp elements and " << 100*args->hp_percent << "\% hp elements" <<  std::endl;
+    std::cout << "and AP splits: " << 100*args->dp_percent << "\% dp elements and " << 100*args->sp_percent << "\% sp elements";
+#ifdef HAVE_HALF_MATH
+    std::cout << " and " << 100*args->hp_percent << "\% hp elements" <<  std::endl;
+#else
+    std::cout << std::endl;
+#endif
 #endif
     std::cout << "The residual of the final iteration is: ||A*x_star - b||_infty = " <<
     std::scientific << residuals_vec[loop_params.residual_count] << ".\n";

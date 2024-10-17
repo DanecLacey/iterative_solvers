@@ -57,7 +57,7 @@ struct CRSMtxData
 
         std::cout << "values = [";
         for(int i = 0; i < nnz; ++i){
-            std::cout << val[i] << ", ";
+            std::cout << static_cast<double>(val[i]) << ", ";
         }
         std::cout << "]" << std::endl;
     }
@@ -66,9 +66,9 @@ struct CRSMtxData
 template <typename VT>
 struct COOMtxData
 {
-    int n_rows{};
-    int n_cols{};
-    int nnz{};
+    long n_rows{};
+    long n_cols{};
+    long nnz{};
 
     bool is_sorted{};
     bool is_symmetric{};
@@ -354,15 +354,43 @@ struct SparseMtxFormat{
 #ifdef USE_USPMV
     ScsData<VT, int> *scs_mat;
 #ifdef USE_AP
-    ScsData<double, int> *scs_mat_hp;
-    ScsData<float, int> *scs_mat_lp;
+    ScsData<double, int> *scs_mat_dp;
+    ScsData<float, int> *scs_mat_sp;
+#ifdef HAVE_HALF_MATH
+    ScsData<_Float16, int> *scs_mat_hp;
+#endif
 #endif
     ScsData<VT, int> *scs_L;
     ScsData<VT, int> *scs_U;
+#ifdef USE_AP
+    ScsData<double, int> *scs_L_dp;
+    ScsData<double, int> *scs_U_dp;
+    ScsData<float, int> *scs_L_sp;
+    ScsData<float, int> *scs_U_sp;
+#ifdef HAVE_HALF_MATH
+    ScsData<_Float16, int> *scs_L_hp;
+    ScsData<_Float16, int> *scs_U_hp;
+#endif
+#endif
 #endif
     CRSMtxData<VT> *crs_mat;
     CRSMtxData<VT> *crs_L;
     CRSMtxData<VT> *crs_U;
+#ifdef USE_USPMV
+#ifdef USE_AP
+    CRSMtxData<double> *crs_mat_dp; //done
+    CRSMtxData<double> *crs_L_dp; //done
+    CRSMtxData<double> *crs_U_dp; //done
+    CRSMtxData<float> *crs_mat_sp; //done
+    CRSMtxData<float> *crs_L_sp; //done
+    CRSMtxData<float> *crs_U_sp; //done
+#ifdef HAVE_HALF_MATH
+    CRSMtxData<_Float16> *crs_mat_hp; //done
+    CRSMtxData<_Float16> *crs_L_hp; //done
+    CRSMtxData<_Float16> *crs_U_hp; //done
+#endif
+#endif
+#endif
 };
 
 #endif
