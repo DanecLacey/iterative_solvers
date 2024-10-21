@@ -54,8 +54,6 @@ void assign_cli_inputs(
     }
     else if(st == "-cg"){
         args->solver_type = "conjugate-gradient";
-        printf("ERROR: assign_cli_inputs: Conjugate Gradient [-cg] is still under development.\n");
-        exit(1);
     }
     else if(st == "-gm"){
         args->solver_type = "gmres";
@@ -81,6 +79,23 @@ void assign_cli_inputs(
             }
             else{
                 printf("ERROR: assign_cli_inputs: Please choose an available preconditioner type:\n-j (Jacobi)\n-gs (Gauss-Seidel)\n");
+                exit(1);
+            }
+        }
+        if (arg == "-scale"){
+           std::string scale = argv[++i];
+
+            if (scale == "max"){
+                args->scale_type = "max";
+            }
+            else if (scale == "diag"){
+                args->scale_type = "diag";
+            }
+            else if (scale == "none"){
+                args->scale_type = "none";
+            }
+            else{
+                printf("ERROR: assign_cli_inputs: Please choose an available matrix scaling type:\nmax (Max row/col element)\ndiag (Diagonal)\nnone\n");
                 exit(1);
             }
         }
@@ -360,6 +375,8 @@ void print_timers(argType<VT> *args){
     long double compute_R_wtime;
     long double get_x_wtime;
     long double apply_preconditioner_wtime;
+    long double dot_wtime;
+    long double sum_wtime;
 
     if(args->solver_type == "gmres"){
         spmv_wtime = args->timers->gmres_spmv_wtime->get_wtime();
@@ -378,6 +395,11 @@ void print_timers(argType<VT> *args){
 #endif
         get_x_wtime = args->timers->gmres_get_x_wtime->get_wtime();
     }
+    else if(args->solver_type == "conjugate-gradient"){
+        spmv_wtime = args->timers->cg_spmv_wtime->get_wtime();
+        dot_wtime = args->timers->cg_dot1_wtime->get_wtime() + args->timers->cg_dot2_wtime->get_wtime();
+        sum_wtime = args->timers->cg_sum1_wtime->get_wtime() + args->timers->cg_sum2_wtime->get_wtime();
+    }
 
     int right_flush_width = 30;
     int left_flush_width = 25;
@@ -394,8 +416,7 @@ void print_timers(argType<VT> *args){
     else if(args->solver_type == "gauss-seidel"){
         std::cout << std::left << std::setw(left_flush_width) << "| | GS Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
     }
-
-    if(args->solver_type == "gmres"){
+    else if(args->solver_type == "gmres"){
         std::cout << std::left << std::setw(left_flush_width) << "| | GMRES Solver time: "      << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "                 << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
         std::cout << std::left << std::setw(left_flush_width) << "| | | Apply Precon: " << std::right << std::setw(right_flush_width) << apply_preconditioner_wtime  << "[s]" <<std::endl;
@@ -418,6 +439,13 @@ void print_timers(argType<VT> *args){
         std::cout << std::left << std::setw(left_flush_width) << "| | | Get x: "                << std::right << std::setw(right_flush_width) << get_x_wtime  << "[s]" <<std::endl;
 
         solver_wtime += get_x_wtime;
+
+    }
+    else if(args->solver_type == "conjugate-gradient"){
+        std::cout << std::left << std::setw(left_flush_width) << "| | CG Solver time: " << std::right << std::setw(right_flush_width) << solver_wtime << "[s]" << std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | SpMV: "                 << std::right << std::setw(right_flush_width) << spmv_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Dot: "                 << std::right << std::setw(right_flush_width) << dot_wtime  << "[s]" <<std::endl;
+        std::cout << std::left << std::setw(left_flush_width) << "| | | Sum: "                 << std::right << std::setw(right_flush_width) << sum_wtime  << "[s]" <<std::endl;
 
     }
     std::cout << std::left << std::setw(left_flush_width) << "| | Other: " << std::right << std::setw(right_flush_width) << solver_harness_wtime - solver_wtime << "[s]" << std::endl;

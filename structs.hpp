@@ -93,6 +93,7 @@ struct argType {
     LoopParams *loop_params;
     std::string solver_type;
     std::string preconditioner_type;
+    std::string scale_type = "diag";
     Flags *flags;
     const std::string *matrix_file_name;
     double calc_time_elapsed;

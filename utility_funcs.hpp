@@ -157,12 +157,18 @@ void gen_neg_inv(
 template <typename VT>
 void extract_diag(
     const COOMtxData<double> *coo_mat,
-    VT *diag
+    VT *diag,
+    bool take_sqrt = false
 ){
     #pragma omp parallel for schedule (static)
     for (int nz_idx = 0; nz_idx < coo_mat->nnz; ++nz_idx){
         if(coo_mat->I[nz_idx] == coo_mat->J[nz_idx]){
-            diag[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
+            if(take_sqrt){
+                diag[coo_mat->I[nz_idx]] = std::sqrt(std::abs(coo_mat->values[nz_idx]));
+            }
+            else{
+                diag[coo_mat->I[nz_idx]] = coo_mat->values[nz_idx];
+            }
         }
     }
 }
@@ -449,6 +455,12 @@ void record_residual_norm(
 
         // The residual norm is already implicitly computed, and is output from the GMRES iteration
     }
+    else if(args->solver_type == "conjugate-gradient"){
+        // Not necessary since CG computes the residual vector within the algorithm.
+        // *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+        *residual_norm = euclidean_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+
+    }
     
     args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
     
@@ -488,7 +500,9 @@ void scale_vector(
 ){
     #pragma omp parallel for schedule (static)
     for (int idx = 0; idx < vec_len; ++idx){
-       vec_to_scale[idx] = vec_to_scale[idx] / (*largest_elems)[idx];
+       vec_to_scale[idx] = vec_to_scale[idx] / ((*largest_elems)[idx] * (*largest_elems)[idx]);
+    //    vec_to_scale[idx] = vec_to_scale[idx] / (*largest_elems)[idx];
+
     }
 };
 

@@ -51,33 +51,30 @@ void vec_spmv_coo(
     }
 }
 
-void sum_vectors(
-    std::vector<double> *result_vec,
-    const std::vector<double> *vec1,
-    const std::vector<double> *vec2
+template <typename VT1, typename VT2, typename VT3>
+void sum_vectors_cpu(
+    VT1 *result_vec,
+    const VT2 *vec1,
+    const VT3 *vec2,
+    int N,
+    double scale = 1.0
 ){
-#ifdef DEBUG_MODE
-    if(vec1->size() != vec2->size()){
-        printf("ERROR: sum_vectors: mismatch in vector sizes.\n");
-        exit(1);
-    }
-    if(vec1->size() == 0){
-        printf("ERROR: sum_vectors: zero size vectors.\n");
-        exit(1);
-    }
-#endif
 
     #pragma omp parallel for
-    for (int i=0; i<vec1->size(); i++){
-        (*result_vec)[i] = (*vec1)[i] + (*vec2)[i];
+    for (int i=0; i<N; i++){
+        result_vec[i] = vec1[i] + scale*(vec2[i]);
+        // std::cout << static_cast<double>(vec1[i]) << " + ";
+        // std::cout << static_cast<double>(scale) << " * ";
+        // std::cout << static_cast<double>(vec2[i]) << " = ";
+        // std::cout << static_cast<double>(result_vec[i]) << std::endl; 
     }
 }
 
-template <typename VT, typename BT>
+template <typename VT1, typename VT2, typename VT3>
 void subtract_vectors_cpu(
-    VT *result_vec,
-    const BT *vec1,
-    const VT *vec2,
+    VT1 *result_vec,
+    const VT2 *vec1,
+    const VT3 *vec2,
     int N,
     double scale = 1.0
 ){
@@ -169,14 +166,14 @@ void scale_residual(
     }
 }
 
-template <typename VT>
+template <typename VT, typename RT>
 void dot(
     const VT *vec1,
     const VT *vec2,
-    double *result,
+    RT *result,
     int N
 ){
-    double sum = 0;
+    RT sum = 0;
     #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i] * vec2[i];
@@ -377,10 +374,10 @@ void sum_matrices(
 
 }
 
-template<typename VT>
+template<typename MT, typename VT>
 void spmv_crs_cpu(
     VT *y,
-    const CRSMtxData<VT> *crs_mat,
+    const CRSMtxData<MT> *crs_mat,
     VT *x
     )
 {
@@ -664,45 +661,45 @@ void infty_vec_norm_gpu(
 
 /* Residual here is the distance from A*x_new to b, where the norm
  is the infinity norm: ||A*x_new-b||_infty */
- template <typename VT, typename FT>
+ template <typename MT, typename VT>
 void calc_residual_cpu(
-    SparseMtxFormat<VT> *sparse_mat,
-    FT *x,
-    VT *b,
-    VT *r,
-    FT *tmp,
-    FT *tmp_perm,
+    SparseMtxFormat<MT> *sparse_mat,
+    VT *x,
+    MT *b,
+    MT *r,
+    VT *tmp,
+    VT *tmp_perm,
     int N
 ){
 
 //  Why do you want to use uspmv for this?
-#ifdef USE_USPMV
-    // uspmv_omp_csr_cpu<double, int>(
-    //     sparse_mat->scs_mat->C,
-    //     sparse_mat->scs_mat->n_chunks,
-    //     &(sparse_mat->scs_mat->chunk_ptrs)[0],
-    //     &(sparse_mat->scs_mat->chunk_lengths)[0],
-    //     &(sparse_mat->scs_mat->col_idxs)[0],
-    //     &(sparse_mat->scs_mat->values)[0],
-    //     x,
-    //     tmp);
+// #ifdef USE_USPMV
+//     // uspmv_omp_csr_cpu<double, int>(
+//     //     sparse_mat->scs_mat->C,
+//     //     sparse_mat->scs_mat->n_chunks,
+//     //     &(sparse_mat->scs_mat->chunk_ptrs)[0],
+//     //     &(sparse_mat->scs_mat->chunk_lengths)[0],
+//     //     &(sparse_mat->scs_mat->col_idxs)[0],
+//     //     &(sparse_mat->scs_mat->values)[0],
+//     //     x,
+//     //     tmp);
 
-    uspmv_scs_cpu<VT, FT, int>(
-        sparse_mat->scs_mat->C,
-        sparse_mat->scs_mat->n_chunks,
-        &(sparse_mat->scs_mat->chunk_ptrs)[0],
-        &(sparse_mat->scs_mat->chunk_lengths)[0],
-        &(sparse_mat->scs_mat->col_idxs)[0],
-        &(sparse_mat->scs_mat->values)[0],
-        x,
-        tmp_perm
-    );
-    apply_permutation<FT, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
+//     uspmv_scs_cpu<MT, VT, int>(
+//         sparse_mat->scs_mat->C,
+//         sparse_mat->scs_mat->n_chunks,
+//         &(sparse_mat->scs_mat->chunk_ptrs)[0],
+//         &(sparse_mat->scs_mat->chunk_lengths)[0],
+//         &(sparse_mat->scs_mat->col_idxs)[0],
+//         &(sparse_mat->scs_mat->values)[0],
+//         x,
+//         tmp_perm
+//     );
+//     apply_permutation<VT, int>(tmp, tmp_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], N);
 
-#else
-    spmv_crs_cpu<FT>(tmp, sparse_mat->crs_mat, x);
-#endif
-    subtract_residual_cpu<VT, FT>(r, b, tmp, N);
+// #else
+    spmv_crs_cpu<MT, VT>(tmp, sparse_mat->crs_mat, x);
+// #endif
+    subtract_residual_cpu<MT, VT>(r, b, tmp, N);
 
 #ifdef DEBUG_MODE
     std::cout << "b check" << std::endl;

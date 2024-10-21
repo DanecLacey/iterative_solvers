@@ -111,11 +111,6 @@ void gs_iteration_sep_cpu(
         AP_VALUE_TYPE
     );
 
-    // sparse_mat->scs_U_dp->print();
-    // sparse_mat->scs_U_sp->print();
-    // sparse_mat->scs_U_hp->print();
-    // exit(1);    
-
 #ifdef DEBUG_MODE_FINE
 #ifdef USE_AP
     printf("Ux = [");

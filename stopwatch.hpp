@@ -55,6 +55,12 @@ struct Timers
     Stopwatch *gmres_compute_R_wtime;
     Stopwatch *gmres_get_x_wtime;
     Stopwatch *gmres_apply_preconditioner_wtime;
+
+    Stopwatch *cg_spmv_wtime;
+    Stopwatch *cg_dot1_wtime;
+    Stopwatch *cg_dot2_wtime;
+    Stopwatch *cg_sum1_wtime;
+    Stopwatch *cg_sum2_wtime;
 };
 
 #endif

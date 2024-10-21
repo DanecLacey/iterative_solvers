@@ -114,14 +114,23 @@ void preprocessing(
     args->timers->preprocessing_wtime = preprocessing_wtime;
     args->timers->preprocessing_wtime->start_stopwatch();
 
-    // An optional, but usually necessary preprocessing step
-    std::vector<double> largest_row_elems(args->coo_mat->n_cols, 0.0);
-    extract_largest_row_elems(args->coo_mat, &largest_row_elems);
-    scale_matrix_rows(args->coo_mat, &largest_row_elems);
+    // Equilibration. An optional, but usually necessary preprocessing step for convergence
+    std::vector<double> scaling_row_elems(args->coo_mat->n_cols, 1.0);
+    std::vector<double> scaling_col_elems(args->coo_mat->n_cols, 1.0);
 
-    std::vector<double> largest_col_elems(args->coo_mat->n_cols, 0.0);
-    extract_largest_col_elems(args->coo_mat, &largest_col_elems);
-    scale_matrix_cols(args->coo_mat, &largest_col_elems);
+    if(args->scale_type == "max"){
+        extract_largest_row_elems(args->coo_mat, &scaling_row_elems);
+        extract_largest_col_elems(args->coo_mat, &scaling_row_elems);
+        
+    }
+    else if(args->scale_type == "diag"){
+        extract_diag<double>(args->coo_mat, scaling_row_elems.data(), true);
+        extract_diag<double>(args->coo_mat, scaling_col_elems.data(), true);
+    }
+
+    scale_matrix_rows(args->coo_mat, &scaling_row_elems);
+    scale_matrix_cols(args->coo_mat, &scaling_col_elems);
+
 
 #ifdef USE_USPMV
     // Convert COO mat to Sell-C-Simga
@@ -166,8 +175,8 @@ void preprocessing(
 #ifdef HAVE_HALF_MATH
         mtx_mat_hp, 
 #endif
-        &largest_row_elems, 
-        &largest_col_elems, 
+        &scaling_row_elems, 
+        &scaling_col_elems, 
         AP_THRESHOLD_1,
         AP_THRESHOLD_2,
         AP_VALUE_TYPE,
@@ -260,12 +269,13 @@ void preprocessing(
 
     // Make b vector
     generate_vector<VT>(solver->b, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_b);
-    // ^ b should likely draw from A(min) to A(max) range of values
-    scale_vector<VT>(solver->b, &largest_row_elems, args->vec_size);
+    scale_vector<VT>(solver->b, &scaling_row_elems, args->vec_size);
 
     // Make initial x vector
     generate_vector<VT>(solver->x_old, args->vec_size, args->flags->random_data, &(args->coo_mat->values)[0], args->loop_params->init_x);
-    scale_vector<VT>(solver->x_old, &largest_row_elems, args->vec_size);
+    scale_vector<VT>(solver->x_old, &scaling_row_elems, args->vec_size);
+
+    
 
     // TODO: Ugly, wrap-up in a subroutine
 #ifdef USE_AP
@@ -289,8 +299,6 @@ void preprocessing(
     }
 #endif
 #endif
-
-
 
 #ifdef __CUDACC__
     gpu_copy_structs(args);
@@ -353,7 +361,9 @@ void run_solver(
 
     Solver<VT> *solver = new Solver<VT>(args->solver_type, args->preconditioner_type);
     gmresArgs<VT> *gmres_args = new gmresArgs<VT>;
+    cgArgs<VT> *cg_args = new cgArgs<VT>;
     solver->gmres_args = gmres_args;
+    solver->cg_args = cg_args;
 
 #ifdef USE_SCAMAC
         std::cout << "Generating Matrix" << std::endl;
@@ -473,8 +483,6 @@ void run_solver(
 #endif
 #endif
 #endif
-
-
         preprocessing<VT>(args, solver);
 
         solve<VT>(args, solver);
