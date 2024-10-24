@@ -13,11 +13,11 @@ CPP_VERSION = c++23
 
 ### Solver Parameters ###
 # [int]
-MAX_ITERS=10000
+MAX_ITERS=5000
 # [float]
-TOL=1e-12
+TOL=1e-14
  # [int]
-GMRES_RESTART_LEN=110
+GMRES_RESTART_LEN=100
  # [double/float/half]
 WORKING_PRECISION=double
 
@@ -51,15 +51,16 @@ SCAMAC_LIB = /home/hpc/k107ce/k107ce17/linking_it_solve/SCAMAC/build/library/lib
 
 # NOTE: We assume USpMV is in the same directory
 # [1/0]
-USE_USPMV = 1
+USE_USPMV = 0
 # [1/0]
 USE_AP = 0
 # ['"none"', '"ap[dp_sp]"', '"ap[dp_hp]"', '"ap[sp_hp]"', '"ap[dp_sp_hp]"']
-AP_VALUE_TYPE = '"ap[sp_hp]"'
+AP_VALUE_TYPE = '"ap[dp_hp]"'
 # [float]
-AP_THRESHOLD_1 = 2.5
+AP_THRESHOLD_1 = 10000000000000000000.0
+# AP_THRESHOLD_1 = 0.0
 # [float]
-AP_THRESHOLD_2 = 1.5
+AP_THRESHOLD_2 = 0.0
 # [int]
 CHUNK_SIZE = 1
 # [int]

@@ -174,7 +174,7 @@ void gs_iteration_sep_cpu(
     }
 #endif
 #endif
-    subtract_vectors_cpu<VT, VT>(tmp, b, tmp, n_rows);
+    subtract_vectors_cpu<VT, VT, VT, VT>(tmp, b, tmp, n_rows);
 
 #ifdef DEBUG_MODE_FINE
 #ifdef USE_AP

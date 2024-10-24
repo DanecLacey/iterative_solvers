@@ -19,15 +19,24 @@ struct gmresArgs
     double beta;
     VT *init_v;
     VT *V;
-    double *Vy;
-    double *H;
-    double *H_tmp;
-    double *J;
-    double *R;
-    double *Q;
-    double *Q_copy;
-    double *g;
-    double *g_copy;
+#ifdef USE_USPMV
+#ifdef USE_AP
+    double *V_dp;
+    float *V_sp;
+#ifdef HAVE_HALF_MATH
+    _Float16 *V_hp;
+#endif
+#endif
+#endif
+    VT *Vy;
+    VT *H;
+    VT *H_tmp;
+    VT *J;
+    VT *R;
+    VT *Q;
+    VT *Q_copy;
+    VT *g;
+    VT *g_copy;
     int restart_count;
     int restart_length;
 };
@@ -62,25 +71,40 @@ void gmres_iteration_ref_cpu(
     SparseMtxFormat<VT> *sparse_mat,
     Timers *timers,
     std::string preconditioner_type,
+    double beta, // <- why does this not need to be a pointer dereference?
     VT *D,
     VT *V,
-    double *H,
-    double *H_tmp,
-    double *J,
-    double *Q,
-    double *Q_copy,
+    VT *H,
+    VT *H_tmp,
+    VT *J,
+    VT *Q,
+    VT *Q_copy,
     VT *w,
     VT *w_perm,
-    double *R,
-    double *g,
-    double *g_copy,
+    VT *R,
+    VT *g,
+    VT *g_copy,
     VT *b,
     VT *x,
-    double beta,
+#ifdef USE_USPMV
+#ifdef USE_AP
+    double *V_dp,
+    double *w_dp,
+    double *w_perm_dp,
+    float *V_sp,
+    float *w_sp,
+    float *w_perm_sp,
+#ifdef HAVE_HALF_MATH
+    _Float16 *V_hp,
+    _Float16 *w_hp,
+    _Float16 *w_perm_hp,
+#endif
+#endif
+#endif
     int n_rows,
     int restart_count,
     int iter_count,
-    double *residual_norm,
+    VT *residual_norm,
     int restart_len
 ){
     // NOTES:
@@ -101,60 +125,138 @@ void gmres_iteration_ref_cpu(
     // w_k = A*v_k (SpMV)
     // NOTE: We don't time the permutations in the case of USpMV, 
     // as that is an aspect of the implementation and not necessary for Sell-C-Sigma
+    // timers->gmres_spmv_wtime->start_stopwatch();
+// #ifdef USE_USPMV
+//     execute_spmv<VT, int>(
+//         sparse_mat->scs_mat_dp->C,
+//         sparse_mat->scs_mat_dp->n_chunks,
+//         sparse_mat->scs_mat_dp->chunk_ptrs,
+//         sparse_mat->scs_mat_dp->chunk_lengths,
+//         sparse_mat->scs_mat_dp->col_idxs,
+//         sparse_mat->scs_mat_dp->values,
+//         sparse_mat->scs_mat_sp->C,
+//         sparse_mat->scs_mat_sp->n_chunks,
+//         sparse_mat->scs_mat_sp->chunk_ptrs,
+//         sparse_mat->scs_mat_sp->chunk_lengths,
+//         sparse_mat->scs_mat_sp->col_idxs,
+//         sparse_mat->scs_mat_sp->values,
+// #ifdef HAVE_HALF_MATH
+//         sparse_mat->scs_mat_hp->C,
+//         sparse_mat->scs_mat_hp->n_chunks,
+//         sparse_mat->scs_mat_hp->chunk_ptrs,
+//         sparse_mat->scs_mat_hp->chunk_lengths,
+//         sparse_mat->scs_mat_hp->col_idxs,
+//         sparse_mat->scs_mat_hp->values,
+// #endif
+//         &V[iter_count*n_rows],
+// #ifdef USE_AP
+//         w,
+//         AP_VALUE_TYPE
+// #else
+//         w
+// #endif
+//     );
+// #else
+//     spmv_crs_cpu<VT>(&V[iter_count*n_rows], sparse_mat->crs_mat, w);
+// #endif
+//     timers->gmres_spmv_wtime->end_stopwatch();
+
+//     // If using USPMV, then need to permute x
+// #ifdef USE_USPMV
+// #ifdef USE_AP
+//     apply_permutation(w, w_perm, &(sparse_mat->scs_mat_dp->old_to_new_idx)[0], n_rows);
+// #else
+//     apply_permutation(w, w_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
+// #endif
+// #endif
+
     timers->gmres_spmv_wtime->start_stopwatch();
+
 #ifdef USE_USPMV
-    execute_spmv<VT, int>(
-        sparse_mat->scs_mat_dp->C,
-        sparse_mat->scs_mat_dp->n_chunks,
-        sparse_mat->scs_mat_dp->chunk_ptrs,
-        sparse_mat->scs_mat_dp->chunk_lengths,
-        sparse_mat->scs_mat_dp->col_idxs,
-        sparse_mat->scs_mat_dp->values,
-        sparse_mat->scs_mat_sp->C,
-        sparse_mat->scs_mat_sp->n_chunks,
-        sparse_mat->scs_mat_sp->chunk_ptrs,
-        sparse_mat->scs_mat_sp->chunk_lengths,
-        sparse_mat->scs_mat_sp->col_idxs,
-        sparse_mat->scs_mat_sp->values,
-#ifdef HAVE_HALF_MATH
-        sparse_mat->scs_mat_hp->C,
-        sparse_mat->scs_mat_hp->n_chunks,
-        sparse_mat->scs_mat_hp->chunk_ptrs,
-        sparse_mat->scs_mat_hp->chunk_lengths,
-        sparse_mat->scs_mat_hp->col_idxs,
-        sparse_mat->scs_mat_hp->values,
-#endif
-        &V[iter_count*n_rows],
+    execute_uspmv<VT, int>(
+        &(sparse_mat->scs_mat->C),
+        &(sparse_mat->scs_mat->n_chunks),
+        sparse_mat->scs_mat->chunk_ptrs.data(),
+        sparse_mat->scs_mat->chunk_lengths.data(),
+        sparse_mat->scs_mat->col_idxs.data(),
+        sparse_mat->scs_mat->values.data(),
+        &V[iter_count*n_rows], //input
+        w_perm, //output
 #ifdef USE_AP
-        w,
+        &(sparse_mat->scs_mat_dp->C),
+        &(sparse_mat->scs_mat_dp->n_chunks),
+        sparse_mat->scs_mat_dp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_dp->chunk_lengths.data(),
+        sparse_mat->scs_mat_dp->col_idxs.data(),
+        sparse_mat->scs_mat_dp->values.data(),
+        &V_dp[iter_count*n_rows], //input
+        w_perm_dp, //output
+        &(sparse_mat->scs_mat_sp->C),
+        &(sparse_mat->scs_mat_sp->n_chunks),
+        sparse_mat->scs_mat_sp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_sp->chunk_lengths.data(),
+        sparse_mat->scs_mat_sp->col_idxs.data(),
+        sparse_mat->scs_mat_sp->values.data(),
+        &V_sp[iter_count*n_rows], //input
+        w_perm_sp, //output
+#ifdef HAVE_HALF_MATH
+        &(sparse_mat->scs_mat_hp->C),
+        &(sparse_mat->scs_mat_hp->n_chunks),
+        sparse_mat->scs_mat_hp->chunk_ptrs.data(),
+        sparse_mat->scs_mat_hp->chunk_lengths.data(),
+        sparse_mat->scs_mat_hp->col_idxs.data(),
+        sparse_mat->scs_mat_hp->values.data(),
+        &V_hp[iter_count*n_rows], //input
+        w_perm_hp, //output
+#endif
+#endif
         AP_VALUE_TYPE
-#else
-        w
-#endif
     );
-#else
-    spmv_crs_cpu<VT>(&V[iter_count*n_rows], sparse_mat->crs_mat, w);
-#endif
+
     timers->gmres_spmv_wtime->end_stopwatch();
 
-    // If using USPMV, then need to permute x
-#ifdef USE_USPMV
+    // Permute rows back
 #ifdef USE_AP
-    apply_permutation(w, w_perm, &(sparse_mat->scs_mat_dp->old_to_new_idx)[0], n_rows);
+    if(xstr(WORKING_PRECISION) == "double")
+        apply_permutation(w_dp, w_perm_dp, &(sparse_mat->scs_mat_dp->old_to_new_idx)[0], n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        apply_permutation(w_sp, w_perm_sp, &(sparse_mat->scs_mat_sp->old_to_new_idx)[0], n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        apply_permutation(w_hp, w_perm_hp, &(sparse_mat->scs_mat_hp->old_to_new_idx)[0], n_rows);
+#endif
+    }
 #else
     apply_permutation(w, w_perm, &(sparse_mat->scs_mat->old_to_new_idx)[0], n_rows);
 #endif
+#else
+    // If you're not using USPMV, then just perform this spmv
+    spmv_crs_cpu<VT>(w, sparse_mat->crs_mat, &V[iter_count*n_rows]);
+    timers->gmres_spmv_wtime->end_stopwatch();
 #endif
 
     timers->gmres_apply_preconditioner_wtime->start_stopwatch();
+    // TODO: Be careful with the precisions here!
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        apply_gmres_preconditioner<double>(preconditioner_type, sparse_mat, w_dp, w_dp, D, n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        apply_gmres_preconditioner<float>(preconditioner_type, sparse_mat, w_sp, w_sp, D, n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        apply_gmres_preconditioner<_Float16>(preconditioner_type, sparse_mat, w_hp, w_hp, D, n_rows);
+#endif
+    }
+#else
     apply_gmres_preconditioner<VT>(preconditioner_type, sparse_mat, w, w, D, n_rows);
+#endif
     timers->gmres_apply_preconditioner_wtime->end_stopwatch();
 
 
 #ifdef DEBUG_MODE
     std::cout << "w = [";
         for(int i = 0; i < n_rows; ++i){
-            std::cout << w[i] << ", ";
+            std::cout << static_cast<double>(w[i]) << ", ";
         }
     std::cout << "]" << std::endl;
 #endif
@@ -169,20 +271,50 @@ void gmres_iteration_ref_cpu(
 #ifdef FINE_TIMERS
         timers->gmres_mgs_dot_wtime->start_stopwatch();
 #endif
+
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        dot(w_dp, &V_dp[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        dot(w_sp, &V_sp[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        dot(w_hp, &V_hp[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+#endif
+    }
+#else
         dot(w, &V[j*n_rows], &H[iter_count + j*restart_len] , n_rows);
+#endif
+
 #ifdef FINE_TIMERS
         timers->gmres_mgs_dot_wtime->end_stopwatch(); 
 #endif
 
 #ifdef DEBUG_MODE
-        std::cout << "h_" << j << "_" << iter_count << " = " << H[iter_count + j*restart_len] << std::endl;
+        std::cout << "h_" << j << "_" << iter_count << " = ";
+        std::cout << static_cast<double>(H[iter_count + j*restart_len]) << std::endl;
 #endif
 
         // w_j <- w_j - h_ij*v_k
 #ifdef FINE_TIMERS
         timers->gmres_mgs_sub_wtime->start_stopwatch();
 #endif
+
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        subtract_vectors_cpu(w_dp, w_dp, &V_dp[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+    else if(xstr(WORKING_PRECISION) == "float")
+        subtract_vectors_cpu(w_sp, w_sp, &V_sp[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        subtract_vectors_cpu(w_hp, w_hp, &V_hp[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+#endif
+    }
+#else
         subtract_vectors_cpu(w, w, &V[j*n_rows], n_rows, H[iter_count + j*restart_len]); 
+#endif
+
+        
 #ifdef FINE_TIMERS
         timers->gmres_mgs_sub_wtime->end_stopwatch();
 #endif
@@ -190,7 +322,7 @@ void gmres_iteration_ref_cpu(
 #ifdef DEBUG_MODE
         std::cout << "adjusted_w_" << j << "_rev  = [";
             for(int i = 0; i < n_rows; ++i){
-                std::cout << w[i] << ", ";
+                std::cout << static_cast<double>(w[i]) << ", ";
             }
         std::cout << "]" << std::endl;
 #endif
@@ -203,7 +335,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx < restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < n_rows; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << V[(n_rows*row_idx) + col_idx]  << ", ";
+                std::cout << static_cast<double>(V[(n_rows*row_idx) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -211,14 +343,29 @@ void gmres_iteration_ref_cpu(
 #endif
 
     // Save norm to Hessenberg matrix subdiagonal H[k+1,k]
-    H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w, n_rows);
+    // H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w, n_rows);
+
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w_dp, n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w_sp, n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w_hp, n_rows);
+#endif
+    }
+#else
+        H[(iter_count+1)*restart_len + iter_count] = euclidean_vec_norm_cpu(w, n_rows);
+#endif
+
 
 #ifdef DEBUG_MODE
     std::cout << "H" << " = [\n";
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H[(restart_len*row_idx) + col_idx]  << ", ";
+                std::cout << static_cast<double>(H[(restart_len*row_idx) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -226,17 +373,32 @@ void gmres_iteration_ref_cpu(
 #endif
 
     // Normalize the new orthogonal vector v <- v/H[k+1,k]
-    scale(&V[(iter_count+1)*n_rows], w, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+    // scale(&V[(iter_count+1)*n_rows], w, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        scale(&V_dp[(iter_count+1)*n_rows], w_dp, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+    else if(xstr(WORKING_PRECISION) == "float")
+        scale(&V_sp[(iter_count+1)*n_rows], w_sp, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        scale(&V_hp[(iter_count+1)*n_rows], w_hp, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+#endif
+    }
+#else
+        scale(&V[(iter_count+1)*n_rows], w, 1.0/H[(iter_count+1)*restart_len + iter_count], n_rows);
+#endif
 
 #ifdef DEBUG_MODE
     std::cout << "v_" << iter_count+1 << " = [";
         for(int i = 0; i < n_rows; ++i){
             std::cout << std::setw(fixed_width);
-            std::cout << V[(iter_count+1)*n_rows + i] << ", ";
+            std::cout << static_cast<double>(V[(iter_count+1)*n_rows + i]) << ", ";
         }
     std::cout << "]" << std::endl;
 #endif
 
+#ifndef USE_AP
 #ifdef DEBUG_MODE
     // Sanity check: Check if all basis vectors in V are orthonormal
     for(int k = 0; k < iter_count+1; ++k){
@@ -258,6 +420,7 @@ void gmres_iteration_ref_cpu(
         }
     }
 #endif
+#endif
 
     timers->gmres_orthog_wtime->end_stopwatch();
 
@@ -266,18 +429,18 @@ void gmres_iteration_ref_cpu(
     timers->gmres_leastsq_wtime->start_stopwatch();
 
     // Per-iteration "local" Givens rotation (m+1 x m+1) matrix
-    init_identity(J, 0.0, (restart_len+1), (restart_len+1)); 
+    init_identity<VT>(J, 0.0, (restart_len+1), (restart_len+1)); 
 
     // The effect all of rotations so far upon the (k+1 x k) Hesseberg matrix
     // (except we store as row vectors, for pointer reasons...)
-    init_identity(H_tmp, 0.0, (restart_len+1), restart_len); 
+    init_identity<VT>(H_tmp, 0.0, (restart_len+1), restart_len); 
 
 #ifdef DEBUG_MODE
     std::cout << "H_tmp_old" << " = [\n";
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H_tmp[(restart_len*row_idx) + col_idx]  << ", ";
+                std::cout << static_cast<double>(H_tmp[(restart_len*row_idx) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -298,7 +461,7 @@ void gmres_iteration_ref_cpu(
     else{
         // Compute H_tmp = Q*H (dense MMM) (m+1 x m) = (m+1 x m+1)(m+1 x m)(i.e. perform all rotations on H)
         // NOTE: Could cut the indices in half+1, since only an "upper" (lower here) hessenberg matrix mult
-        dense_MMM_t_t(Q, H, H_tmp, (restart_len+1), (restart_len+1), restart_len);
+        dense_MMM_t_t<VT>(Q, H, H_tmp, (restart_len+1), (restart_len+1), restart_len);
     }
 #ifdef FINE_TIMERS
     timers->gmres_compute_H_tmp_wtime->end_stopwatch();
@@ -309,7 +472,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << H_tmp[(restart_len*row_idx) + col_idx]  << ", ";
+                std::cout << static_cast<double>(H_tmp[(restart_len*row_idx) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -318,8 +481,8 @@ void gmres_iteration_ref_cpu(
 
     // Form Givens rotation matrix for next iteration
     // NOTE: since J is typically column accessed, need to transpose to access rows
-    double J_denom = std::sqrt(std::pow(H_tmp[(iter_count*restart_len) + iter_count],2) + \
-                     std::pow(H_tmp[(iter_count+1)*restart_len + iter_count],2));
+    double J_denom = std::sqrt(std::pow(static_cast<double>(H_tmp[(iter_count*restart_len) + iter_count]),2) + \
+                     std::pow(static_cast<double>(H_tmp[(iter_count+1)*restart_len + iter_count]),2));
 
     double c_i = H_tmp[(iter_count*restart_len) + iter_count] / J_denom;
     double s_i = H_tmp[((iter_count+1)*restart_len) + iter_count] / J_denom;
@@ -338,7 +501,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << J[((restart_len+1)*row_idx) + col_idx]  << ", ";
+                std::cout << static_cast<double>(J[((restart_len+1)*row_idx) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -350,7 +513,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q[(restart_len+1)*row_idx + col_idx]  << ", ";
+                std::cout << static_cast<double>(Q[(restart_len+1)*row_idx + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -381,7 +544,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q[(restart_len+1)*row_idx + col_idx]  << ", ";
+                std::cout << static_cast<double>(Q[(restart_len+1)*row_idx + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -402,7 +565,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
+                std::cout << static_cast<double>(R[(row_idx*restart_len) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -412,29 +575,29 @@ void gmres_iteration_ref_cpu(
 #ifdef DEBUG_MODE
     // Sanity check: Validate that H == Q_tR ((m+1 x m) == (m+1 x m+1)(m+1 x m))
 
-    double *Q_t = new double[(restart_len+1) * (restart_len+1)];
-    init(Q_t, 0.0, (restart_len+1) * (restart_len+1));
+    VT *Q_t = new VT[(restart_len+1) * (restart_len+1)];
+    init<VT>(Q_t, 0.0, (restart_len+1) * (restart_len+1));
 
-    dense_transpose(Q, Q_t, restart_len+1, restart_len+1);
+    dense_transpose<VT>(Q, Q_t, restart_len+1, restart_len+1);
 
     std::cout << "Q_t" << " = [\n";
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx <= restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q_t[(restart_len+1)*row_idx + col_idx]  << ", ";
+                std::cout << static_cast<double>(Q_t[(restart_len+1)*row_idx + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
     std::cout << "]" << std::endl;
 
-    double *Q_tR = new double[(restart_len+1) * (restart_len)];
-    init(Q_tR, 0.0, (restart_len+1) * (restart_len));
+    VT *Q_tR = new VT[(restart_len+1) * (restart_len)];
+    init<VT>(Q_tR, 0.0, (restart_len+1) * (restart_len));
 
     // Compute Q_tR (dense MMM) (m+1 x m) <- (m+1 x m+1)(m+1 x m)
     for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
         for(int col_idx = 0; col_idx < restart_len; ++col_idx){
-            double tmp = 0.0;
-            strided_2_dot(&Q_t[row_idx*(restart_len+1)], &R[col_idx], &tmp, restart_len+1, restart_len);
+            VT tmp = 0.0;
+            strided_2_dot<VT>(&Q_t[row_idx*(restart_len+1)], &R[col_idx], &tmp, restart_len+1, restart_len);
             Q_tR[(row_idx*restart_len) + col_idx] = tmp;
         }
     }
@@ -444,7 +607,7 @@ void gmres_iteration_ref_cpu(
         for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
             for(int col_idx = 0; col_idx < restart_len; ++col_idx){
                 std::cout << std::setw(fixed_width);
-                std::cout << Q_tR[(row_idx*restart_len) + col_idx]  << ", ";
+                std::cout << static_cast<double>(Q_tR[(row_idx*restart_len) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -454,7 +617,7 @@ void gmres_iteration_ref_cpu(
     for(int row_idx = 0; row_idx <= restart_len; ++row_idx){
         for(int col_idx = 0; col_idx < restart_len; ++col_idx){
             int idx = row_idx*restart_len + col_idx;
-            if(std::abs(Q_tR[idx] - H[idx]) > tol){
+            if(std::abs(static_cast<double>(Q_tR[idx] - H[idx])) > tol){
                 printf("GMRES ERROR: The Q_tR factorization of H at index %i has a value %.17g, \n \
                     and does not have a value of %.17g as was expected.\n", \
                     row_idx*restart_len + col_idx, Q_tR[idx], H[row_idx*restart_len + col_idx]);
@@ -466,17 +629,17 @@ void gmres_iteration_ref_cpu(
 #ifdef DEBUG_MODE
     std::cout << "g_" << iter_count << " = [\n";
     for(int i = 0; i <= restart_len; ++i){
-        std::cout << g[i]  << ", ";
+        std::cout << static_cast<double>(g[i])  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif
 
     // g_k+1 <- Q* g_k (dMVM) ((m+1 x 1) = (m+1 x m+1)(m+1 x 1))
-    init(g_copy, 0.0, restart_len+1);
+    init<VT>(g_copy, 0.0, restart_len+1);
     g_copy[0] = beta;
-    init(g, 0.0, restart_len+1);
+    init<VT>(g, 0.0, restart_len+1);
     g[0] = beta;
-    dense_MMM(Q, g, g_copy, (restart_len+1), (restart_len+1), 1);
+    dense_MMM<VT>(Q, g, g_copy, (restart_len+1), (restart_len+1), 1);
 
     // TODO: lazy copy
     for(int row_idx = 0; row_idx < restart_len+1; ++row_idx){
@@ -486,16 +649,16 @@ void gmres_iteration_ref_cpu(
 #ifdef DEBUG_MODE
     std::cout << "g_" << iter_count+1 << " = [\n";
     for(int i = 0; i <= restart_len; ++i){
-        std::cout << g[i]  << ", ";
+        std::cout << static_cast<double>(g[i])  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif
 
     // Extract the last element from g as residual norm
-    *residual_norm = std::abs(g[iter_count + 1]);
+    *residual_norm = std::abs(static_cast<double>(g[iter_count + 1]));
 
 #ifdef DEBUG_MODE
-    std::cout << "residual_norm = " << *residual_norm << std::endl;
+    std::cout << "residual_norm = " << static_cast<double>(*residual_norm) << std::endl;
 #endif
 
 
@@ -514,15 +677,26 @@ void allocate_gmres_structs(
     std::cout << "Allocating space for GMRES structs" << std::endl;
     VT *init_v = new VT[vec_size];
     VT *V = new VT[vec_size * (gmres_args->restart_length + 1)]; // (m x n)
-    double *Vy = new double[vec_size]; // (m x 1)
-    double *H = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m) 
-    double *H_tmp = new double[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m)
-    double *J = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)];
-    double *R = new double[gmres_args->restart_length * (gmres_args->restart_length + 1)]; // (m+1 x m)
-    double *Q = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
-    double *Q_copy = new double[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
-    double *g = new double[gmres_args->restart_length + 1];
-    double *g_copy = new double[gmres_args->restart_length + 1];
+    VT *Vy = new VT[vec_size]; // (m x 1)
+    VT *H = new VT[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m) 
+    VT *H_tmp = new VT[(gmres_args->restart_length + 1) * gmres_args->restart_length]; // (m+1 x m)
+    VT *J = new VT[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)];
+    VT *R = new VT[gmres_args->restart_length * (gmres_args->restart_length + 1)]; // (m+1 x m)
+    VT *Q = new VT[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
+    VT *Q_copy = new VT[(gmres_args->restart_length + 1) * (gmres_args->restart_length + 1)]; // (m+1 x m+1)
+    VT *g = new VT[gmres_args->restart_length + 1];
+    VT *g_copy = new VT[gmres_args->restart_length + 1];
+
+#ifdef USE_AP
+    double *V_dp = new double[vec_size * (gmres_args->restart_length + 1)];
+    double *Vy_dp = new double[vec_size];
+    float *V_sp = new float[vec_size * (gmres_args->restart_length + 1)];
+    float *Vy_sp = new float[vec_size];
+#ifdef HAVE_HALF_MATH
+    _Float16 *V_hp = new _Float16[vec_size * (gmres_args->restart_length + 1)];
+    _Float16 *Vy_hp = new _Float16[vec_size];
+#endif
+#endif
 
     gmres_args->init_v = init_v;
     gmres_args->V = V;
@@ -536,6 +710,17 @@ void allocate_gmres_structs(
     gmres_args->g = g;
     gmres_args->g_copy = g_copy;
     gmres_args->restart_count = 0;
+
+#ifdef USE_AP
+    gmres_args->V_dp = V_dp;
+    gmres_args->Vy_dp = Vy_dp;
+    gmres_args->V_sp = V_sp;
+    gmres_args->Vy_sp = Vy_sp;
+#ifdef HAVE_HALF_MATH
+    gmres_args->V_hp = V_hp;
+    gmres_args->Vy_hp = Vy_hp;
+#endif
+#endif
 }
 
 template <typename VT>
@@ -559,8 +744,25 @@ void init_gmres_structs(
     std::cout << "]" << std::endl;
 #endif
     
-
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double"){
+        init<double>(gmres_args->V_dp, 0.0, n_rows * (restart_len+1));
+        init<double>(gmres_args->Vy_dp, 0.0, n_rows);
+    }
+    else if(xstr(WORKING_PRECISION) == "float"){
+        init<float>(gmres_args->V_sp, 0.0f, n_rows * (restart_len+1));
+        init<float>(gmres_args->Vy_sp, 0.0f, n_rows);
+    }
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        init<_Float16>(gmres_args->V_hp, 0.0f16, n_rows * (restart_len+1));
+        init<_Float16>(gmres_args->Vy_hp, 0.0f16, n_rows);
+#endif
+    }
+#else
     init<VT>(gmres_args->V, 0.0, n_rows * (restart_len+1));
+    init<VT>(gmres_args->Vy, 0.0, n_rows);
+#endif
 
     // Give v0 to first row of V
     #pragma omp parallel for
@@ -568,20 +770,18 @@ void init_gmres_structs(
         gmres_args->V[i] = gmres_args->init_v[i];
     }
     
-    init<double>(gmres_args->H, 0.0, restart_len * (restart_len+1));
+    init<VT>(gmres_args->H, 0.0, restart_len * (restart_len+1));
 
-    init<double>(gmres_args->Vy, 0.0, n_rows);
+    init_identity<VT>(gmres_args->R, 0.0, restart_len, (restart_len+1));
     
-    init_identity<double>(gmres_args->R, 0.0, restart_len, (restart_len+1));
-    
-    init_identity<double>(gmres_args->Q, 0.0, (restart_len+1), (restart_len+1));
+    init_identity<VT>(gmres_args->Q, 0.0, (restart_len+1), (restart_len+1));
 
-    init_identity<double>(gmres_args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
+    init_identity<VT>(gmres_args->Q_copy, 0.0, (restart_len+1), (restart_len+1));
 
-    init<double>(gmres_args->g, 0.0, restart_len+1);
+    init<VT>(gmres_args->g, 0.0, restart_len+1);
     gmres_args->g[0] = gmres_args->beta; // <- supply starting element
     
-    init<double>(gmres_args->g_copy, 0.0, restart_len+1);
+    init<VT>(gmres_args->g_copy, 0.0, restart_len+1);
     gmres_args->g_copy[0] = gmres_args->beta; // <- supply starting element
 }
 
@@ -644,12 +844,28 @@ void init_gmres_timers(Timers *timers){
 
 template <typename VT>
 void gmres_get_x(
-    double *R,
-    double *g,
+    VT *R,
+    VT *g,
     VT *x,
     VT *x_0,
     VT *V,
-    double *Vy,
+    VT *Vy,
+#ifdef USE_AP
+    double *x_dp,
+    double *x_0_dp,
+    double *V_dp,
+    double *Vy_dp,
+    float *x_sp,
+    float *x_0_sp,
+    float *V_sp,
+    float *Vy_sp,
+#ifdef HAVE_HALF_MATH
+    _Float16 *x_hp,
+    _Float16 *x_0_hp,
+    _Float16 *V_hp,
+    _Float16 *Vy_hp,
+#endif
+#endif
     int n_rows,
     int restart_count,
     int iter_count,
@@ -673,7 +889,7 @@ void gmres_get_x(
     for(int row_idx = iter_count; row_idx >= 0; --row_idx){
         for(int col_idx = iter_count; col_idx >= 0; --col_idx){
                 std::cout << std::setw(11);
-                std::cout << R[(row_idx*restart_len) + col_idx]  << ", ";
+                std::cout << static_cast<double>(R[(row_idx*restart_len) + col_idx])  << ", ";
             }
             std::cout << "\n";
         }
@@ -708,20 +924,56 @@ void gmres_get_x(
 #endif
 
     // (dense) matrix vector multiply Vy <- V*y ((n x 1) = (n x m)(m x 1))
+    // dense_MMM_t<VT>(V, &y[0], Vy, n_rows, restart_len, 1);
+
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double")
+        dense_MMM_t<double>(V_dp, &y_dp[0], Vy_dp, n_rows, restart_len, 1);
+    else if(xstr(WORKING_PRECISION) == "float")
+        dense_MMM_t<float>(V_sp, &y_sp[0], Vy_sp, n_rows, restart_len, 1);
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        dense_MMM_t<_Float16>(V_hp, &y_hp[0], Vy_hp, n_rows, restart_len, 1);
+#endif
+    }
+#else
     dense_MMM_t<VT>(V, &y[0], Vy, n_rows, restart_len, 1);
+#endif
 
 #ifdef DEBUG_MODE
     std::cout << "Vy_" << iter_count << " = [\n";
     for(int i = 0; i < n_rows; ++i){
-        std::cout << Vy[i]  << ", ";
+        std::cout << static_cast<double>(Vy[i])  << ", ";
     }
     std::cout << "]" << std::endl;
 #endif
 
-    // Finally, solve for x ((n x 1) = (n x 1) + (n x m)(m x 1))
+    // // Finally, solve for x ((n x 1) = (n x 1) + (n x m)(m x 1))
+#ifdef USE_AP
+    if(xstr(WORKING_PRECISION) == "double"){
+        for(int i = 0; i < n_rows; ++i){
+            x_dp[i] = x_0_dp[i] + Vy_dp[i];
+        }
+    }
+    else if(xstr(WORKING_PRECISION) == "float"){
+        for(int i = 0; i < n_rows; ++i){
+            x_sp[i] = x_0_sp[i] + Vy_sp[i];
+        }
+    }   
+    else if(xstr(WORKING_PRECISION) == "half"){
+#ifdef HAVE_HALF_MATH
+        for(int i = 0; i < n_rows; ++i){
+            x_hp[i] = x_0_hp[i] + Vy_hp[i];
+        }
+#endif
+    }
+#else
     for(int i = 0; i < n_rows; ++i){
         x[i] = x_0[i] + Vy[i];
-        // std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
+#ifdef DEBUG_MODE_FINE
+        std::cout << "x[" << i << "] = " << x_0[i] << " + " << Vy[i] << " = " << x[i] << std::endl; 
+#endif
     }
+#endif
 }
 #endif

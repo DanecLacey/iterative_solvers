@@ -403,7 +403,7 @@ void record_residual_norm(
     _Float16 *tmp_perm_hp,
 #endif
 #endif
-    double *residual_norm
+    VT *residual_norm
 ){
     if(args->solver_type == "jacobi"){
 #ifdef USE_AP
@@ -422,7 +422,8 @@ void record_residual_norm(
 #else
         calc_residual_cpu<VT, VT>(sparse_mat, x_new, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
 #endif
-        *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+        // *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+        *residual_norm = euclidean_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
     }
     else if(args->solver_type == "gauss-seidel"){
 #ifdef USE_AP
@@ -442,25 +443,47 @@ void record_residual_norm(
 #else
         calc_residual_cpu<VT, VT>(sparse_mat, x, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
 #endif
-        *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+        // *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+        *residual_norm = euclidean_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+
+        #ifdef DEBUG_MODE
+            std::cout << "computed residual_norm = " << static_cast<double>(*residual_norm) << std::endl;
+        #endif
     }
     else if(args->solver_type == "gmres"){
         // NOTE: While not needed for GMRES in theory, it is helpful to compare
         // a computed residual with g[-1] when debugging 
-//         calc_residual_cpu(sparse_mat, x, b, r, tmp, args->vec_size);
-//         *residual_norm = euclidean_vec_norm_cpu(r, args->vec_size);
-// #ifdef DEBUG_MODE
-//         std::cout << "computed residual_norm = " << *residual_norm << std::endl;
-// #endif
-
         // The residual norm is already implicitly computed, and is output from the GMRES iteration
+// #ifdef USE_AP
+//         std::string working_precision = xstr(WORKING_PRECISION);
+//         if(working_precision == "double"){
+//             calc_residual_cpu<VT, double>(sparse_mat, x_dp, b, r, tmp_dp, tmp_perm_dp, args->coo_mat->n_cols);
+//         }
+//         else if(working_precision == "float"){
+//             calc_residual_cpu<VT, float>(sparse_mat, x_sp, b, r, tmp_sp, tmp_perm_sp, args->coo_mat->n_cols);
+//         }
+//         else if(working_precision == "half"){
+// #ifdef HAVE_HALF_MATH
+//             calc_residual_cpu<VT, _Float16>(sparse_mat, x_hp, b, r, tmp_hp, tmp_perm_hp, args->coo_mat->n_cols);
+// #endif
+//         }
+
+// #else
+//         calc_residual_cpu<VT, VT>(sparse_mat, x, b, r, tmp, tmp_perm, args->coo_mat->n_cols);
+// #endif
+//         *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
+
+//         #ifdef DEBUG_MODE
+//             std::cout << "computed residual_norm = " << static_cast<double>(*residual_norm) << std::endl;
+//         #endif
     }
     else if(args->solver_type == "conjugate-gradient"){
         // Not necessary since CG computes the residual vector within the algorithm.
         // *residual_norm = infty_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
         *residual_norm = euclidean_vec_norm_cpu<VT>(r, args->coo_mat->n_cols);
-
     }
+
+    // std::cout << "residual norm = " << static_cast<double>(*residual_norm) << std::endl;
     
     args->normed_residuals[args->loop_params->residual_count] = *residual_norm;
     

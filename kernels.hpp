@@ -51,13 +51,13 @@ void vec_spmv_coo(
     }
 }
 
-template <typename VT1, typename VT2, typename VT3>
+template <typename VT1, typename VT2, typename VT3, typename VT>
 void sum_vectors_cpu(
     VT1 *result_vec,
     const VT2 *vec1,
     const VT3 *vec2,
     int N,
-    double scale = 1.0
+    VT scale = 1.0
 ){
 
     #pragma omp parallel for
@@ -70,13 +70,13 @@ void sum_vectors_cpu(
     }
 }
 
-template <typename VT1, typename VT2, typename VT3>
+template <typename VT1, typename VT2, typename VT3, typename VT>
 void subtract_vectors_cpu(
     VT1 *result_vec,
     const VT2 *vec1,
     const VT3 *vec2,
     int N,
-    double scale = 1.0
+    VT scale = 1.0
 ){
     // Not an Orphaned directive!
     #pragma omp parallel for
@@ -118,9 +118,10 @@ void subtract_vectors_cpu_od(
 }
 
 // Tranpose a dense matrix
+template <typename VT>
 void dense_transpose(
-    const double *mat,
-    double *mat_t,
+    const VT *mat,
+    VT *mat_t,
     int n_rows,
     int n_cols
 ){
@@ -173,7 +174,7 @@ void dot(
     RT *result,
     int N
 ){
-    RT sum = 0;
+    RT sum{};
     #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i] * vec2[i];
@@ -193,14 +194,15 @@ void dot_od(
     }
 }
 
+template <typename VT>
 void strided_1_dot(
-    const double *vec1,
-    const double *vec2,
-    double *result,
+    const VT *vec1,
+    const VT *vec2,
+    VT *result,
     int N,
     int stride
 ){
-    double sum = 0;
+    VT sum{};
     #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i*stride] * vec2[i];
@@ -208,14 +210,15 @@ void strided_1_dot(
     *result = sum;
 }
 
+template <typename VT>
 void strided_2_dot(
-    const double *vec1,
-    const double *vec2,
-    double *result,
+    const VT *vec1,
+    const VT *vec2,
+    VT *result,
     int N,
     int stride
 ){
-    double sum = 0;
+    VT sum{};
     // #pragma omp parallel for reduction(+:sum)
     for (int i = 0; i < N; ++i){
         sum += vec1[i] * vec2[i*stride];
@@ -388,8 +391,9 @@ void spmv_crs_cpu(
 #endif
         #pragma omp for schedule(static)
         for(int row_idx = 0; row_idx < crs_mat->n_rows; ++row_idx){
-            double tmp = 0.0;
-            #pragma omp simd simdlen(VECTOR_LENGTH) reduction(+:tmp)
+            VT tmp{};
+            // #pragma omp simd simdlen(VECTOR_LENGTH) reduction(+:tmp)
+            #pragma omp simd
             for(int nz_idx = crs_mat->row_ptr[row_idx]; nz_idx < crs_mat->row_ptr[row_idx+1]; ++nz_idx){
                 tmp += crs_mat->val[nz_idx] * x[crs_mat->col[nz_idx]];
     // #ifdef DEBUG_MODE_FINE
@@ -469,10 +473,11 @@ void spltsv_crs(
 }
 
 // C = AB (n x m) = (n x q)(q x m)
+template <typename VT>
 void dense_MMM(
-    double *A,
-    double *B,
-    double *C,
+    VT *A,
+    VT *B,
+    VT *C,
     int n_rows_A,
     int n_cols_A,
     int n_cols_B
@@ -480,7 +485,7 @@ void dense_MMM(
     // #pragma omp parallel for collapse(2)
     for (int i = 0; i < n_rows_A; ++i) {
         for (int j = 0; j < n_cols_B; ++j) {
-            double tmp = 0.0;
+            VT tmp = 0.0;
             for (int k = 0; k < n_cols_A; ++k) {
                 tmp += A[i * n_cols_A + k] * B[k * n_cols_B + j];
             }
@@ -494,7 +499,7 @@ template <typename VT>
 void dense_MMM_t(
     VT *A,
     VT *B,
-    double *C,
+    VT *C,
     int n_rows_A,
     int n_cols_A,
     int n_cols_B
@@ -512,10 +517,11 @@ void dense_MMM_t(
 }
 
 // C = AB??? (n x q) = (n x m)(m x q)
+template <typename VT>
 void dense_MMM_t_t(
-    double *A,
-    double *B,
-    double *C,
+    VT *A,
+    VT *B,
+    VT *C,
     int n_rows_A,
     int n_cols_A,
     int n_cols_B
@@ -550,7 +556,7 @@ VT euclidean_vec_norm_cpu(
 }
 
 template <typename VT>
-double infty_vec_norm_cpu(
+VT infty_vec_norm_cpu(
     const VT *vec,
     int N
 ){
@@ -558,8 +564,8 @@ double infty_vec_norm_cpu(
     double curr_abs;
     for (int i = 0; i < N; ++i){
         // TODO:: Hmmm...
-        // curr_abs = std::abs(static_cast<double>(vec[i]));
-        curr_abs = (vec[i] >= 0) ? vec[i]  : -1*vec[i];
+        curr_abs = std::abs(static_cast<double>(vec[i]));
+        // curr_abs = (vec[i] >= 0) ? vec[i]  : -1*vec[i];
         if ( curr_abs > max_abs){
             max_abs = curr_abs; 
         }
